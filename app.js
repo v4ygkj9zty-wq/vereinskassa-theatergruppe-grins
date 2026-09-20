@@ -1244,16 +1244,19 @@ async function markPaid(id) {
 async function loadBank() {
   await loadReferences();
 
-  const [transactionResult, receiptResult] = await Promise.all([
+  const [transactionResult, receiptResult, incomeResult] = await Promise.all([
     sb.from("bank_transactions").select("*").order("booking_date", { ascending: false }).limit(1000),
-    sb.from("receipts").select("*").in("status", ["approved", "paid"]).order("receipt_date", { ascending: false })
+    sb.from("receipts").select("*").in("status", ["approved", "paid"]).order("receipt_date", { ascending: false }),
+    sb.from("income_entries").select("*").order("entry_date", { ascending: false })
   ]);
 
   if (transactionResult.error) return toast(transactionResult.error.message, true);
   if (receiptResult.error) return toast(receiptResult.error.message, true);
+  if (incomeResult.error) return toast(incomeResult.error.message, true);
 
   const transactions = transactionResult.data || [];
   const receipts = receiptResult.data || [];
+  const incomeEntries = incomeResult.data || [];
   const alreadyLinked = new Set(transactions.map((item) => item.receipt_id).filter(Boolean));
 
   $("bankAccounts").innerHTML = bankAccounts
@@ -1345,6 +1348,130 @@ async function loadBank() {
   document.querySelectorAll(".bank-resolve-btn").forEach((button) => {
     button.addEventListener("click", () => resolveWithoutReceipt(button.dataset.tx));
   });
+
+  const linkedIncomeIds = new Set(transactions.map((item) => item.income_entry_id).filter(Boolean));
+  const openIncomeTransactions = transactions.filter(
+    (item) => Number(item.amount) > 0 &&
+      !item.income_entry_id &&
+      !item.receipt_resolution
+  );
+
+  $("unmatchedIncomeTransactions").innerHTML = openIncomeTransactions.length
+    ? openIncomeTransactions.slice(0, 100).map((item) => {
+        const candidates = incomeEntries.filter((entry) => {
+          if (linkedIncomeIds.has(entry.id)) return false;
+          const sameAmount = Math.abs(Number(item.amount) - Number(entry.amount)) < 0.01;
+          const closeDate = daysApart(entry.entry_date, item.booking_date) <= 14;
+          return sameAmount && closeDate;
+        }).slice(0, 10);
+
+        const select =
+          '<select class="income-match-select" data-tx="' + escapeHtml(item.id) +
+          '"><option value="">- Geldeingang auswaehlen -</option>' +
+          candidates.map((entry) =>
+            '<option value="' + escapeHtml(entry.id) + '">' +
+            escapeHtml(formatDate(entry.entry_date)) + " - " +
+            escapeHtml(entry.source_name || entry.purpose || "Geldeingang") + " - " +
+            euro(entry.amount) + '</option>'
+          ).join("") + '</select>';
+
+        return '<div class="list-row"><div><strong>' +
+          escapeHtml(item.description || item.counterparty || "Bankeingang") +
+          '</strong><div class="hint">' +
+          escapeHtml(formatDate(item.booking_date)) + " - " +
+          escapeHtml(item.counterparty || "") +
+          '</div><div class="bank-match-box">' + select +
+          '<button class="btn btn-primary income-link-btn" data-tx="' +
+          escapeHtml(item.id) + '">Verknuepfen</button>' +
+          '<button class="btn btn-secondary income-resolve-btn" data-tx="' +
+          escapeHtml(item.id) + '">Kein Beleg / Ausnahme</button></div></div>' +
+          '<strong class="money income-amount">' + euro(item.amount) + '</strong></div>';
+      }).join("")
+    : '<p class="hint">Keine offenen Bankeingaenge.</p>';
+
+  document.querySelectorAll(".income-link-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const transactionId = button.dataset.tx;
+      const select = document.querySelector('.income-match-select[data-tx="' + transactionId + '"]');
+      const incomeId = select?.value || "";
+      if (!incomeId) return toast("Bitte zuerst einen Geldeingang auswaehlen.", true);
+      await linkIncomeTransaction(transactionId, incomeId);
+    });
+  });
+
+  document.querySelectorAll(".income-resolve-btn").forEach((button) => {
+    button.addEventListener("click", () => resolveIncomeWithoutReceipt(button.dataset.tx));
+  });
+}
+
+async function linkIncomeTransaction(transactionId, incomeId) {
+  const result = await sb.from("bank_transactions").update({
+    income_entry_id: incomeId
+  }).eq("id", transactionId);
+  if (result.error) return toast("Zuordnung fehlgeschlagen: " + result.error.message, true);
+
+  await sb.from("income_entries").update({
+    bank_transaction_id: transactionId
+  }).eq("id", incomeId);
+
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "bank_transaction",
+    entity_id: transactionId,
+    action: "linked_income_entry",
+    details: { income_entry_id: incomeId }
+  });
+
+  toast("Bankeingang und Geldeingang wurden verknuepft.");
+  await loadBank();
+}
+
+async function resolveIncomeWithoutReceipt(transactionId) {
+  const reasons = {
+    "1": ["not_required_transfer", "Interne Umbuchung - kein zusaetzlicher Beleg erforderlich"],
+    "2": ["historical_not_in_app", "Historischer Eingang - nicht in dieser App erfasst"],
+    "3": ["bank_document_sufficient", "Bankauszug / Bankbeleg ist der Nachweis"],
+    "4": ["no_external_receipt", "Kein separater Eingangsbeleg vorhanden - interner Nachweis"],
+    "5": ["other", "Sonstiger Grund"]
+  };
+  const answer = window.prompt(
+    "Eingang ohne separaten Beleg:\\n" +
+    "1 = Interne Umbuchung\\n" +
+    "2 = Historischer Eingang, nicht in App\\n" +
+    "3 = Bankauszug ist Nachweis\\n" +
+    "4 = Kein separater Eingangsbeleg vorhanden\\n" +
+    "5 = Sonstiger Grund\\n\\nNummer eingeben:"
+  );
+  if (answer === null) return;
+  const selected = reasons[answer.trim()];
+  if (!selected) return toast("Bitte 1 bis 5 auswaehlen.", true);
+
+  let note = selected[1];
+  if (answer.trim() === "4" || answer.trim() === "5") {
+    const entered = window.prompt("Kurze Bemerkung / Begruendung:");
+    if (entered === null || !entered.trim()) return toast("Bitte eine kurze Begruendung eintragen.", true);
+    note = entered.trim();
+  }
+
+  const result = await sb.from("bank_transactions").update({
+    receipt_resolution: selected[0],
+    receipt_resolution_note: note,
+    receipt_resolved_by: currentUser.id,
+    receipt_resolved_at: new Date().toISOString()
+  }).eq("id", transactionId);
+
+  if (result.error) return toast("Status konnte nicht gespeichert werden: " + result.error.message, true);
+
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "bank_transaction",
+    entity_id: transactionId,
+    action: "income_exception_set",
+    details: { resolution: selected[0], note: note }
+  });
+
+  toast("Bankeingang wurde als erledigt markiert.");
+  await loadBank();
 }
 
 async function resolveWithoutReceipt(transactionId) {
