@@ -13,6 +13,7 @@ let categories = [];
 let bankAccounts = [];
 let csvRows = [];
 let csvHeaders = [];
+let dashboardTransactions = [];
 
 const financeRoles = ["treasurer", "deputy_treasurer", "admin", "auditor"];
 const editRoles = ["treasurer", "deputy_treasurer", "admin"];
@@ -839,6 +840,9 @@ async function loadDashboard() {
   const yearTransactions = accountTransactions.filter(
     (item) => Number(item.booking_date.slice(0, 4)) === selectedYear
   );
+  dashboardTransactions = yearTransactions.slice().sort((a, b) =>
+    String(b.booking_date).localeCompare(String(a.booking_date))
+  );
 
   const selectedAccounts = selectedAccount
     ? accounts.filter((item) => item.id === selectedAccount)
@@ -894,6 +898,7 @@ async function loadDashboard() {
   $("statPayout").textContent = euro(payout);
 
   renderMonthChart(yearTransactions, supplementalReceipts);
+  renderTransactionDetails();
   renderApprovalList(receipts.filter((item) => item.status === "submitted"));
 }
 
@@ -939,6 +944,61 @@ function renderMonthChart(transactions, supplementalReceipts = []) {
       );
     })
     .join("");
+}
+
+function receiptResolutionLabel(value) {
+  const labels = {
+    not_required_transfer: "Interne Umbuchung",
+    historical_not_in_app: "Historischer Beleg nicht in App",
+    bank_document_sufficient: "Bankauszug ist Nachweis",
+    no_external_receipt: "Interner Nachweis",
+    capital_gains_tax_bank_document: "KESt - Bankauszug",
+    bank_fees_bank_document: "Bankspesen - Bankauszug",
+    other: "Sonstiger Grund"
+  };
+  return labels[value] || "";
+}
+
+function renderTransactionDetails() {
+  if (!$("transactionDetails")) return;
+  const term = String($("transactionSearch")?.value || "").trim().toLowerCase();
+  const rows = dashboardTransactions.filter((item) => {
+    if (!term) return true;
+    return [
+      item.booking_date,
+      item.description,
+      item.counterparty,
+      item.external_reference,
+      item.amount,
+      receiptResolutionLabel(item.receipt_resolution)
+    ].some((value) => String(value || "").toLowerCase().includes(term));
+  });
+
+  const incoming = rows.filter((x) => Number(x.amount) > 0).reduce((s, x) => s + Number(x.amount), 0);
+  const outgoing = Math.abs(rows.filter((x) => Number(x.amount) < 0).reduce((s, x) => s + Number(x.amount), 0));
+  $("transactionSummary").innerHTML =
+    '<strong>' + rows.length + ' Buchungen</strong>' +
+    '<span class="hint">Eingänge ' + euro(incoming) + ' · Ausgänge ' + euro(outgoing) + '</span>';
+
+  $("transactionDetails").innerHTML = rows.length
+    ? '<table class="transaction-table"><thead><tr><th>Datum</th><th>Buchung</th><th>Gegenpartei</th><th>Referenz</th><th>Belegstatus</th><th class="amount-head">Betrag</th></tr></thead><tbody>' +
+      rows.map((item) => {
+        const status = item.receipt_id
+          ? "Beleg zugeordnet"
+          : item.receipt_resolution
+            ? receiptResolutionLabel(item.receipt_resolution)
+            : (Number(item.amount) < 0 ? "Beleg offen" : "–");
+        return '<tr>' +
+          '<td>' + escapeHtml(formatDate(item.booking_date)) + '</td>' +
+          '<td><strong>' + escapeHtml(item.description || "Buchung") + '</strong></td>' +
+          '<td>' + escapeHtml(item.counterparty || "–") + '</td>' +
+          '<td>' + escapeHtml(item.external_reference || "–") + '</td>' +
+          '<td>' + escapeHtml(status) + '</td>' +
+          '<td class="money ' + (Number(item.amount) >= 0 ? "income-amount" : "expense-amount") + '">' + euro(item.amount) + '</td>' +
+          '</tr>';
+      }).join("") +
+      '</tbody></table>'
+    : '<p class="hint">Keine Buchungen für diese Auswahl.</p>';
 }
 
 function renderApprovalList(receipts) {
@@ -1502,6 +1562,43 @@ async function importBankCsv() {
     });
   }
 
+  const existingResult = await sb
+    .from("bank_transactions")
+    .select("booking_date,amount,description,counterparty")
+    .eq("bank_account_id", accountId);
+
+  if (existingResult.error) {
+    $("importBankBtn").disabled = false;
+    return toast("Dublettenprüfung fehlgeschlagen: " + existingResult.error.message, true);
+  }
+
+  const normalizeText = (value) => String(value || "").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
+  const similarRows = rows.filter((row) =>
+    (existingResult.data || []).some((existing) => {
+      if (existing.booking_date !== row.booking_date) return false;
+      if (Math.abs(Number(existing.amount) - Number(row.amount)) >= 0.01) return false;
+      const a = normalizeText(existing.description || existing.counterparty);
+      const b = normalizeText(row.description || row.counterparty);
+      if (!a || !b) return true;
+      return a === b || a.includes(b) || b.includes(a);
+    })
+  );
+
+  if (similarRows.length) {
+    const proceed = window.confirm(
+      similarRows.length +
+      " Buchung(en) sehen bereits vorhandenen Buchungen sehr ähnlich (gleiches Datum/Betrag und ähnlicher Text). " +
+      "Exakte Dubletten werden ohnehin übersprungen. Import trotzdem fortsetzen?"
+    );
+    if (!proceed) {
+      $("importBankBtn").disabled = false;
+      return toast("Import wurde abgebrochen. Es wurden keine neuen Buchungen importiert.");
+    }
+  }
+
   let added = 0;
 
   for (let index = 0; index < rows.length; index += 200) {
@@ -1879,6 +1976,7 @@ $("receiptFile").addEventListener("change", async (event) => {
 
 $("dashboardYear").addEventListener("change", loadDashboard);
 $("dashboardAccount").addEventListener("change", loadDashboard);
+$("transactionSearch").addEventListener("input", renderTransactionDetails);
 $("auditYear").addEventListener("change", loadAudit);
 $("auditAccount").addEventListener("change", loadAudit);
 $("auditCsvBtn").addEventListener("click", exportAuditCsv);
