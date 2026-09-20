@@ -852,7 +852,11 @@ async function loadDashboard() {
     accountTransactions.reduce((sum, item) => sum + Number(item.amount), 0) +
     selectedAccounts.reduce((sum, item) => sum + Number(item.opening_balance || 0), 0);
 
-  const income = yearTransactions
+  const incomeTransactions = selectedAccount
+    ? yearTransactions
+    : yearTransactions.filter((item) => item.receipt_resolution !== "not_required_transfer");
+
+  const income = incomeTransactions
     .filter((item) => Number(item.amount) > 0)
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -876,7 +880,7 @@ async function loadDashboard() {
       });
 
   const bankExpense = Math.abs(
-    yearTransactions
+    incomeTransactions
       .filter((item) => Number(item.amount) < 0)
       .reduce((sum, item) => sum + Number(item.amount), 0)
   );
@@ -897,7 +901,11 @@ async function loadDashboard() {
   $("statExpense").textContent = euro(expense);
   $("statPayout").textContent = euro(payout);
 
-  renderMonthChart(yearTransactions, supplementalReceipts);
+  const statisticsTransactions = selectedAccount
+    ? yearTransactions
+    : yearTransactions.filter((item) => item.receipt_resolution !== "not_required_transfer");
+
+  renderMonthChart(statisticsTransactions, supplementalReceipts);
   renderTransactionDetails();
   renderApprovalList(receipts.filter((item) => item.status === "submitted"));
 }
