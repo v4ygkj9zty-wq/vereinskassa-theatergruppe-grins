@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>VereinsKassa – Theatergruppe Grins</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div>
+      <h1>Theatergruppe Grins</h1>
+      <div class="subtitle">VereinsKassa</div>
+    </div>
+    <button id="logoutBtn" class="btn btn-light hidden">Abmelden</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="authView" class="card auth-card">
+    <h2>Anmelden</h2>
+    <div class="two-col">
+      <div>
+        <label for="email">E-Mail-Adresse</label>
+        <input id="email" type="email" autocomplete="email">
+        <label for="password">Passwort</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <div class="button-row">
+          <button id="loginBtn" class="btn btn-primary">Anmelden</button>
+          <button id="toggleRegisterBtn" class="btn btn-secondary">Registrieren</button>
+        </div>
+        <div id="authMessage" class="hint"></div>
+      </div>
+      <div id="registerBox" class="hidden">
+        <label for="displayName">Name</label>
+        <input id="displayName" autocomplete="name">
+        <button id="registerBtn" class="btn btn-primary">Konto anlegen</button>
+        <p class="hint">Falls eine Bestätigungs-E-Mail kommt, bitte bestätigen und danach wieder hier anmelden.</p>
+      </div>
+    </div>
+  </section>
+
+  <div id="appView" class="hidden">
+    <section class="card compact user-card">
+      <div>
+        <strong id="helloText"></strong>
+        <div id="roleText" class="hint"></div>
+      </div>
+    </section>
+
+    <nav id="nav" class="nav"></nav>
+
+    <section id="view-submit" class="card app-view">
+      <h2>Beleg einreichen</h2>
+      <label for="receiptFile">Foto oder PDF</label>
+      <input id="receiptFile" type="file" accept="image/*,application/pdf" capture="environment">
+      <div id="ocrStatus" class="hint"></div>
+
+      <div class="two-col">
+        <div>
+          <label for="merchant">Geschäft / Lieferant</label>
+          <input id="merchant">
+        </div>
+        <div>
+          <label for="receiptDate">Datum</label>
+          <input id="receiptDate" type="date">
+        </div>
+        <div>
+          <label for="amount">Betrag (€)</label>
+          <input id="amount" type="number" inputmode="decimal" min="0" step="0.01">
+        </div>
+        <div>
+          <label for="invoiceNumber">Rechnungs-/Belegnummer</label>
+          <input id="invoiceNumber">
+        </div>
+      </div>
+
+      <label for="paymentMethod">Bezahlt mit</label>
+      <select id="paymentMethod">
+        <option value="private_reimbursement">Privat bezahlt – Rückerstattung an mich</option>
+        <option value="club_card">Vereinsbankomatkarte</option>
+        <option value="cash">Vereinskassa / Bar</option>
+      </select>
+
+      <label for="category">Kategorie</label>
+      <select id="category"></select>
+
+      <label for="purpose">Verwendungszweck</label>
+      <textarea id="purpose" placeholder="z. B. Getränke für Theateraufführung"></textarea>
+
+      <button id="submitReceiptBtn" class="btn btn-primary">Beleg einreichen</button>
+    </section>
+
+    <section id="view-my" class="card app-view hidden">
+      <h2>Meine Belege</h2>
+      <div id="myReceipts"></div>
+    </section>
+
+    <section id="view-dashboard" class="app-view hidden">
+      <div class="filters card compact">
+        <div>
+          <label for="dashboardYear">Jahr</label>
+          <select id="dashboardYear"></select>
+        </div>
+        <div>
+          <label for="dashboardAccount">Konto</label>
+          <select id="dashboardAccount"></select>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat"><span>Kontostand</span><strong id="statBalance">€ 0,00</strong></div>
+        <div class="stat"><span>Einnahmen</span><strong id="statIncome">€ 0,00</strong></div>
+        <div class="stat"><span>Ausgaben</span><strong id="statExpense">€ 0,00</strong></div>
+        <div class="stat"><span>Offen auszuzahlen</span><strong id="statPayout">€ 0,00</strong></div>
+      </div>
+
+      <section class="card">
+        <h2>Monatsübersicht</h2>
+        <div id="monthChart"></div>
+      </section>
+
+      <section class="card">
+        <h2>Belege zur Freigabe</h2>
+        <div id="approvalList"></div>
+      </section>
+    </section>
+
+    <section id="view-payouts" class="card app-view hidden">
+      <h2>Zur Auszahlung</h2>
+      <p class="hint">Überweisung selbst im Onlinebanking durchführen und danach als ausbezahlt markieren.</p>
+      <div id="payoutList"></div>
+    </section>
+
+    <section id="view-bank" class="app-view hidden">
+      <section class="card">
+        <h2>Bankkonten</h2>
+        <div id="bankAccounts"></div>
+      </section>
+
+      <section class="card">
+        <h2>Bankauszug importieren</h2>
+        <p class="hint">CSV-Import mit Spaltenzuordnung und Dublettenprüfung.</p>
+
+        <label for="importAccount">Konto</label>
+        <select id="importAccount"></select>
+
+        <label for="bankFile">CSV-Datei</label>
+        <input id="bankFile" type="file" accept=".csv,text/csv">
+
+        <div id="mappingBox" class="hidden">
+          <div class="two-col">
+            <div><label for="mapDate">Datumsspalte</label><select id="mapDate"></select></div>
+            <div><label for="mapAmount">Betragsspalte</label><select id="mapAmount"></select></div>
+            <div><label for="mapDescription">Buchungstext</label><select id="mapDescription"></select></div>
+            <div><label for="mapCounterparty">Gegenpartei</label><select id="mapCounterparty"></select></div>
+          </div>
+          <div id="bankPreview" class="table-wrap"></div>
+          <button id="importBankBtn" class="btn btn-primary">Importieren</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Beleg fehlt / Zuordnung</h2>
+        <div id="missingReceipts"></div>
+      </section>
+    </section>
+
+    <section id="view-members" class="card app-view hidden">
+      <h2>Mitglieder & Rollen</h2>
+      <div id="membersList"></div>
+    </section>
+  </div>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
