@@ -69,3 +69,12 @@ textarea{min-height:86px;resize:vertical}
 .qr-data{display:grid;gap:5px;background:#f7fbfb;border:1px solid #dce8e8;border-radius:10px;padding:11px}
 .qr-data span,.qr-data strong{word-break:break-word}
 .qr-download{text-decoration:none;display:inline-block}
+
+.transaction-table{min-width:900px}
+.transaction-table th{position:sticky;top:0;background:#f7fbfb;z-index:1}
+.transaction-table td{vertical-align:top}
+.amount-head{text-align:right!important}
+.transaction-table .money{text-align:right;white-space:nowrap}
+.income-amount{color:#15803d}
+.expense-amount{color:#b91c1c}
+#transactionSearch{margin:0}
