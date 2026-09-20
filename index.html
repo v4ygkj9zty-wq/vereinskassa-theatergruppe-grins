@@ -96,6 +96,25 @@
       <button id="submitReceiptBtn" class="btn btn-primary">Beleg einreichen</button>
     </section>
 
+    <section id="view-income" class="card app-view hidden">
+      <h2>Geldeingang erfassen</h2>
+      <div class="two-col">
+        <div><label for="incomeDate">Datum</label><input id="incomeDate" type="date"></div>
+        <div><label for="incomeAmount">Betrag (€)</label><input id="incomeAmount" type="number" inputmode="decimal" min="0" step="0.01"></div>
+        <div><label for="incomeSource">Zahler / Quelle</label><input id="incomeSource" placeholder="z. B. Mitglied, Gemeinde, Sponsor"></div>
+        <div><label for="incomeCategory">Kategorie</label><select id="incomeCategory"></select></div>
+        <div><label for="incomeChannel">Zahlungsweg</label><select id="incomeChannel"><option value="bank">Bank</option><option value="cash">Bar / Vereinskassa</option></select></div>
+        <div id="incomeAccountWrap"><label for="incomeAccount">Bankkonto</label><select id="incomeAccount"></select></div>
+      </div>
+      <label for="incomePurpose">Verwendungszweck / Beschreibung</label>
+      <textarea id="incomePurpose" placeholder="z. B. Mitgliedsbeitrag 2026"></textarea>
+      <label for="incomeFile">Beleg / Bestätigung (optional)</label>
+      <input id="incomeFile" type="file" accept="image/*,application/pdf">
+      <button id="saveIncomeBtn" class="btn btn-primary">Geldeingang speichern</button>
+      <h3 style="margin-top:22px">Erfasste Geldeingänge</h3>
+      <div id="incomeList"></div>
+    </section>
+
     <section id="view-my" class="card app-view hidden">
       <h2>Meine Belege</h2>
       <div id="myReceipts"></div>
