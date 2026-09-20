@@ -524,6 +524,32 @@ async function loadMyReceipts() {
   });
 }
 
+function receiptAccountingDate(receipt) {
+  return receipt.receipt_date || String(receipt.created_at || "").slice(0, 10);
+}
+
+function daysApart(dateA, dateB) {
+  const a = new Date(dateA + "T00:00:00");
+  const b = new Date(dateB + "T00:00:00");
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 9999;
+  return Math.abs(a.getTime() - b.getTime()) / 86400000;
+}
+
+function hasLikelyBankMatch(receipt, transactions) {
+  if (receipt.payment_method === "cash") return false;
+  const receiptDate = receiptAccountingDate(receipt);
+  const amount = Number(receipt.amount);
+
+  return transactions.some((transaction) => {
+    if (Number(transaction.amount) >= 0) return false;
+    if (transaction.receipt_id && transaction.receipt_id !== receipt.id) return false;
+
+    const sameAmount = Math.abs(Math.abs(Number(transaction.amount)) - amount) < 0.01;
+    const closeDate = daysApart(receiptDate, transaction.booking_date) <= 7;
+    return sameAmount && closeDate;
+  });
+}
+
 async function loadDashboard() {
   const [receiptResult, transactionResult, accountResult] = await Promise.all([
     sb.from("receipts").select("*"),
@@ -541,7 +567,10 @@ async function loadDashboard() {
 
   const years = new Set([new Date().getFullYear()]);
   transactions.forEach((item) => years.add(Number(item.booking_date.slice(0, 4))));
-  receipts.forEach((item) => years.add(Number(item.created_at.slice(0, 4))));
+  receipts.forEach((item) => {
+    const date = receiptAccountingDate(item);
+    if (date) years.add(Number(date.slice(0, 4)));
+  });
 
   const selectedYear = Number($("dashboardYear").value || Math.max(...years));
   $("dashboardYear").innerHTML = Array.from(years)
@@ -570,11 +599,37 @@ async function loadDashboard() {
     .filter((item) => Number(item.amount) > 0)
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
-  const expense = Math.abs(
+  const approvedReceiptsForYear = receipts.filter((item) => {
+    if (!["approved", "paid"].includes(item.status)) return false;
+    const date = receiptAccountingDate(item);
+    return date && Number(date.slice(0, 4)) === selectedYear;
+  });
+
+  const linkedReceiptIds = new Set(
+    yearTransactions
+      .map((item) => item.receipt_id)
+      .filter(Boolean)
+  );
+
+  const supplementalReceipts = selectedAccount
+    ? []
+    : approvedReceiptsForYear.filter((receipt) => {
+        if (linkedReceiptIds.has(receipt.id)) return false;
+        return !hasLikelyBankMatch(receipt, yearTransactions);
+      });
+
+  const bankExpense = Math.abs(
     yearTransactions
       .filter((item) => Number(item.amount) < 0)
       .reduce((sum, item) => sum + Number(item.amount), 0)
   );
+
+  const receiptExpense = supplementalReceipts.reduce(
+    (sum, receipt) => sum + Number(receipt.amount),
+    0
+  );
+
+  const expense = bankExpense + receiptExpense;
 
   const payout = receipts
     .filter((item) => item.status === "approved" && item.payment_method === "private_reimbursement")
@@ -585,11 +640,11 @@ async function loadDashboard() {
   $("statExpense").textContent = euro(expense);
   $("statPayout").textContent = euro(payout);
 
-  renderMonthChart(yearTransactions);
+  renderMonthChart(yearTransactions, supplementalReceipts);
   renderApprovalList(receipts.filter((item) => item.status === "submitted"));
 }
 
-function renderMonthChart(transactions) {
+function renderMonthChart(transactions, supplementalReceipts = []) {
   const months = Array.from({ length: 12 }, (_, index) => ({ index, income: 0, expense: 0 }));
 
   transactions.forEach((item) => {
@@ -597,6 +652,13 @@ function renderMonthChart(transactions) {
     if (month < 0 || month > 11) return;
     if (Number(item.amount) >= 0) months[month].income += Number(item.amount);
     else months[month].expense += Math.abs(Number(item.amount));
+  });
+
+  supplementalReceipts.forEach((receipt) => {
+    const date = receiptAccountingDate(receipt);
+    const month = date ? Number(date.slice(5, 7)) - 1 : -1;
+    if (month < 0 || month > 11) return;
+    months[month].expense += Number(receipt.amount);
   });
 
   const maximum = Math.max(
@@ -620,8 +682,7 @@ function renderMonthChart(transactions) {
         euro(item.expense) +
         '</span><div class="bar"><i class="expense-bar" style="width:' +
         (item.expense / maximum) * 100 +
-        '%"></i></div></div>' +
-        "</div>"
+        '%"></i></div></div></div>'
       );
     })
     .join("");
