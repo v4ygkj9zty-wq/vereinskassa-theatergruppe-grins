@@ -961,18 +961,7 @@ function receiptResolutionLabel(value) {
 
 function renderTransactionDetails() {
   if (!$("transactionDetails")) return;
-  const term = String($("transactionSearch")?.value || "").trim().toLowerCase();
-  const rows = dashboardTransactions.filter((item) => {
-    if (!term) return true;
-    return [
-      item.booking_date,
-      item.description,
-      item.counterparty,
-      item.external_reference,
-      item.amount,
-      receiptResolutionLabel(item.receipt_resolution)
-    ].some((value) => String(value || "").toLowerCase().includes(term));
-  });
+  const rows = dashboardTransactions;
 
   const incoming = rows.filter((x) => Number(x.amount) > 0).reduce((s, x) => s + Number(x.amount), 0);
   const outgoing = Math.abs(rows.filter((x) => Number(x.amount) < 0).reduce((s, x) => s + Number(x.amount), 0));
@@ -1976,7 +1965,6 @@ $("receiptFile").addEventListener("change", async (event) => {
 
 $("dashboardYear").addEventListener("change", loadDashboard);
 $("dashboardAccount").addEventListener("change", loadDashboard);
-$("transactionSearch").addEventListener("input", renderTransactionDetails);
 $("auditYear").addEventListener("change", loadAudit);
 $("auditAccount").addEventListener("change", loadAudit);
 $("auditCsvBtn").addEventListener("click", exportAuditCsv);
