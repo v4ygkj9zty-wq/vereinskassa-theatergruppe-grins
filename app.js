@@ -1066,7 +1066,12 @@ async function loadPayouts() {
         '</strong></div></div></div>' +
         '<div class="list-actions"><strong class="money">' +
         euro(receipt.amount) +
-        '</strong><button class="btn btn-secondary copy-payment-btn" data-iban="' +
+        '</strong><button class="btn btn-primary qr-payment-btn" data-name="' +
+        escapeHtml(receipt.profiles?.display_name || "") +
+        '" data-iban="' + escapeHtml(receipt.profiles?.iban || "") +
+        '" data-amount="' + escapeHtml(String(receipt.amount)) +
+        '" data-reference="' + escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
+        '">QR-Code anzeigen</button><button class="btn btn-secondary copy-payment-btn" data-iban="' +
         escapeHtml(receipt.profiles?.iban || "") +
         '" data-reference="' +
         escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
@@ -1079,6 +1084,14 @@ async function loadPayouts() {
 
   document.querySelectorAll(".paid-btn").forEach((button) => {
     button.addEventListener("click", () => markPaid(button.dataset.id));
+  });
+  document.querySelectorAll(".qr-payment-btn").forEach((button) => {
+    button.addEventListener("click", () => showPaymentQr({
+      name: button.dataset.name,
+      iban: button.dataset.iban,
+      amount: Number(button.dataset.amount),
+      reference: button.dataset.reference
+    }));
   });
   document.querySelectorAll(".copy-payment-btn").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -1094,6 +1107,56 @@ async function loadPayouts() {
       }
     });
   });
+}
+
+function buildEpcQrPayload(payment) {
+  return [
+    "BCD",
+    "002",
+    "1",
+    "SCT",
+    "",
+    String(payment.name || "").trim().slice(0, 70),
+    String(payment.iban || "").replace(/\s/g, "").toUpperCase(),
+    "EUR" + Number(payment.amount).toFixed(2),
+    "",
+    "",
+    String(payment.reference || "").trim().slice(0, 140),
+    ""
+  ].join("\n");
+}
+
+async function showPaymentQr(payment) {
+  if (!payment.iban) return toast("Bei diesem Mitglied ist noch keine IBAN hinterlegt.", true);
+  try {
+    const QRCode = await import("https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm");
+    const dataUrl = await QRCode.default.toDataURL(buildEpcQrPayload(payment), {
+      errorCorrectionLevel: "M",
+      width: 520,
+      margin: 2
+    });
+    const overlay = document.createElement("div");
+    overlay.className = "qr-overlay";
+    overlay.innerHTML =
+      '<div class="qr-card"><h2>Überweisung mit George</h2>' +
+      '<p class="hint">In George Scan & Pay öffnen und den QR-Code scannen. Am selben Handy kannst du den QR-Code speichern und anschließend in George aus den Bildern/Dateien auswählen.</p>' +
+      '<img class="payment-qr" src="' + dataUrl + '" alt="SEPA Überweisungs QR-Code">' +
+      '<div class="qr-data"><strong>' + escapeHtml(payment.name) + '</strong>' +
+      '<span>' + escapeHtml(formatIban(payment.iban)) + '</span>' +
+      '<strong>' + escapeHtml(euro(payment.amount)) + '</strong>' +
+      '<span>' + escapeHtml(payment.reference) + '</span></div>' +
+      '<div class="button-row"><a class="btn btn-primary qr-download" href="' + dataUrl +
+      '" download="Ueberweisung.png">QR-Code speichern</a>' +
+      '<button class="btn btn-secondary qr-close">Schließen</button></div></div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector(".qr-close").addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.remove();
+    });
+  } catch (error) {
+    console.error(error);
+    toast("QR-Code konnte nicht erstellt werden.", true);
+  }
 }
 
 async function markPaid(id) {
