@@ -1,0 +1,9 @@
+{
+  "name":"VereinsKassa – Theatergruppe Grins",
+  "short_name":"VereinsKassa",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f3f7f7",
+  "theme_color":"#0f766e",
+  "lang":"de-AT"
+}
