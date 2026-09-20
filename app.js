@@ -1218,7 +1218,7 @@ async function loadBank() {
   });
 
   const missing = transactions.filter(
-    (item) => Number(item.amount) < 0 && !item.receipt_id
+    (item) => Number(item.amount) < 0 && !item.receipt_id && !item.receipt_resolution
   );
 
   $("missingReceipts").innerHTML = missing.length
@@ -1268,7 +1268,7 @@ async function loadBank() {
             select +
             '<button class="btn btn-primary bank-link-btn" data-tx="' +
             escapeHtml(item.id) +
-            '">Zuordnen</button></div></div><strong class="money">' +
+            '">Zuordnen</button><button class="btn btn-secondary bank-resolve-btn" data-tx="' + escapeHtml(item.id) + '">Kein Beleg / Ausnahme</button></div></div><strong class="money">' +
             euro(item.amount) +
             "</strong></div>"
           );
@@ -1285,6 +1285,45 @@ async function loadBank() {
       await linkBankTransaction(transactionId, receiptId);
     });
   });
+  document.querySelectorAll(".bank-resolve-btn").forEach((button) => {
+    button.addEventListener("click", () => resolveWithoutReceipt(button.dataset.tx));
+  });
+}
+
+async function resolveWithoutReceipt(transactionId) {
+  const reasons = {
+    "1": ["not_required_transfer", "Interne Umbuchung - kein zusaetzlicher Beleg erforderlich"],
+    "2": ["historical_not_in_app", "Historischer Beleg - nicht in dieser App erfasst"],
+    "3": ["bank_document_sufficient", "Bankauszug / Bankbeleg ist der Nachweis"],
+    "4": ["no_external_receipt", "Kein Fremdbeleg vorhanden - interner Nachweis"],
+    "5": ["other", "Sonstiger Grund"]
+  };
+  const answer = window.prompt("Kein Beleg / Ausnahme:\n1 = Interne Umbuchung\n2 = Historischer Beleg, nicht in App\n3 = Bankauszug ist Nachweis\n4 = Kein Fremdbeleg vorhanden\n5 = Sonstiger Grund\n\nNummer eingeben:");
+  if (answer === null) return;
+  const selected = reasons[answer.trim()];
+  if (!selected) return toast("Bitte 1 bis 5 auswaehlen.", true);
+  let note = selected[1];
+  if (answer.trim() === "4" || answer.trim() === "5") {
+    const entered = window.prompt("Kurze Bemerkung / Begruendung:");
+    if (entered === null || !entered.trim()) return toast("Bitte eine kurze Begruendung eintragen.", true);
+    note = entered.trim();
+  }
+  const result = await sb.from("bank_transactions").update({
+    receipt_resolution: selected[0],
+    receipt_resolution_note: note,
+    receipt_resolved_by: currentUser.id,
+    receipt_resolved_at: new Date().toISOString()
+  }).eq("id", transactionId);
+  if (result.error) return toast("Status konnte nicht gespeichert werden: " + result.error.message, true);
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "bank_transaction",
+    entity_id: transactionId,
+    action: "receipt_exception_set",
+    details: { resolution: selected[0], note: note }
+  });
+  toast("Buchung wurde als erledigt markiert.");
+  await loadBank();
 }
 
 async function linkBankTransaction(transactionId, receiptId) {
