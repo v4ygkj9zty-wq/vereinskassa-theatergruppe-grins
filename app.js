@@ -137,9 +137,11 @@ async function loadReferences() {
   categories = categoryResult.data || [];
   bankAccounts = accountResult.data || [];
 
-  $("category").innerHTML = categories
+  const categoryOptions = categories
     .map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>")
     .join("");
+  $("category").innerHTML = categoryOptions;
+  if ($("incomeCategory")) $("incomeCategory").innerHTML = categoryOptions;
 
   $("importAccount").innerHTML = bankAccounts
     .map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>")
@@ -153,6 +155,9 @@ async function loadReferences() {
 
   $("dashboardAccount").innerHTML = accountOptions;
   if ($("auditAccount")) $("auditAccount").innerHTML = accountOptions;
+  if ($("incomeAccount")) $("incomeAccount").innerHTML = bankAccounts
+    .map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>")
+    .join("");
 }
 
 function buildNavigation() {
@@ -162,6 +167,7 @@ function buildNavigation() {
   ];
 
   if (financeRoles.includes(currentProfile.role)) {
+    items.push(["income", "Geldeingang"]);
     items.push(["dashboard", "Dashboard"]);
     items.push(["audit", "Kassenprüfung / Export"]);
   }
@@ -193,6 +199,7 @@ async function showView(viewName) {
     button.classList.toggle("active", button.dataset.view === viewName);
   });
 
+  if (viewName === "income") await loadIncome();
   if (viewName === "my") await loadMyReceipts();
   if (viewName === "dashboard") await loadDashboard();
   if (viewName === "payouts") await loadPayouts();
@@ -465,6 +472,140 @@ async function openReceiptFile(path) {
     return;
   }
   window.open(result.data.signedUrl, "_blank", "noopener");
+}
+
+async function saveIncome() {
+  const date = $("incomeDate").value;
+  const amount = Number($("incomeAmount").value);
+  const sourceName = $("incomeSource").value.trim();
+  const purpose = $("incomePurpose").value.trim();
+  const paymentChannel = $("incomeChannel").value;
+  const accountId = paymentChannel === "bank" ? $("incomeAccount").value : null;
+  const file = $("incomeFile").files[0];
+
+  if (!date || !amount || amount <= 0 || !purpose) {
+    return toast("Bitte Datum, Betrag und Verwendungszweck eingeben.", true);
+  }
+  if (paymentChannel === "bank" && !accountId) {
+    return toast("Bitte das Bankkonto auswählen.", true);
+  }
+
+  $("saveIncomeBtn").disabled = true;
+  let filePath = null;
+
+  if (file) {
+    if (file.size > 10 * 1024 * 1024) {
+      $("saveIncomeBtn").disabled = false;
+      return toast("Die Datei ist größer als 10 MB.", true);
+    }
+    filePath = currentUser.id + "/income_" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const upload = await sb.storage.from("receipt-files").upload(filePath, file, {
+      contentType: file.type,
+      upsert: false
+    });
+    if (upload.error) {
+      $("saveIncomeBtn").disabled = false;
+      return toast("Datei konnte nicht hochgeladen werden: " + upload.error.message, true);
+    }
+  }
+
+  const result = await sb.from("income_entries").insert({
+    entry_date: date,
+    amount,
+    source_name: sourceName || null,
+    purpose,
+    category_id: $("incomeCategory").value || null,
+    payment_channel: paymentChannel,
+    bank_account_id: accountId,
+    receipt_file_path: filePath,
+    created_by: currentUser.id
+  }).select().single();
+
+  if (result.error) {
+    if (filePath) await sb.storage.from("receipt-files").remove([filePath]);
+    $("saveIncomeBtn").disabled = false;
+    return toast("Geldeingang konnte nicht gespeichert werden: " + result.error.message, true);
+  }
+
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "income_entry",
+    entity_id: result.data.id,
+    action: "created",
+    details: { amount, payment_channel: paymentChannel }
+  });
+
+  $("incomeAmount").value = "";
+  $("incomeSource").value = "";
+  $("incomePurpose").value = "";
+  $("incomeFile").value = "";
+  $("saveIncomeBtn").disabled = false;
+  toast("Geldeingang wurde gespeichert.");
+  await loadIncome();
+}
+
+async function loadIncome() {
+  if (!$("incomeDate").value) $("incomeDate").value = new Date().toISOString().slice(0, 10);
+  $("incomeAccountWrap").classList.toggle("hidden", $("incomeChannel").value !== "bank");
+
+  const result = await sb
+    .from("income_entries")
+    .select("*,categories(name),bank_accounts(name)")
+    .order("entry_date", { ascending: false })
+    .limit(200);
+
+  if (result.error) return toast(result.error.message, true);
+
+  const rows = result.data || [];
+  $("incomeList").innerHTML = rows.length
+    ? rows.map((item) =>
+        '<div class="list-row"><div><strong>' +
+        escapeHtml(formatDate(item.entry_date)) +
+        " · " +
+        escapeHtml(item.source_name || "Geldeingang") +
+        '</strong><div class="hint">' +
+        escapeHtml(item.purpose) +
+        " · " +
+        escapeHtml(item.categories?.name || "") +
+        " · " +
+        escapeHtml(item.payment_channel === "bank" ? (item.bank_accounts?.name || "Bank") : "Bar") +
+        '</div></div><div class="list-actions"><strong class="money">' +
+        euro(item.amount) +
+        "</strong>" +
+        (item.receipt_file_path
+          ? '<button class="btn btn-secondary income-file-btn" data-path="' +
+            escapeHtml(item.receipt_file_path) +
+            '">Beleg</button>'
+          : "") +
+        '<button class="btn btn-danger income-delete-btn" data-id="' +
+        escapeHtml(item.id) +
+        '" data-path="' +
+        escapeHtml(item.receipt_file_path || "") +
+        '">Löschen</button></div></div>'
+      ).join("")
+    : '<p class="hint">Noch keine Geldeingänge manuell erfasst.</p>';
+
+  document.querySelectorAll(".income-file-btn").forEach((button) => {
+    button.addEventListener("click", () => openReceiptFile(button.dataset.path));
+  });
+  document.querySelectorAll(".income-delete-btn").forEach((button) => {
+    button.addEventListener("click", () => deleteIncome(button.dataset.id, button.dataset.path));
+  });
+}
+
+async function deleteIncome(id, filePath) {
+  if (!window.confirm("Geldeingang wirklich löschen?")) return;
+  const result = await sb.from("income_entries").delete().eq("id", id);
+  if (result.error) return toast(result.error.message, true);
+  if (filePath) await sb.storage.from("receipt-files").remove([filePath]);
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "income_entry",
+    entity_id: id,
+    action: "deleted"
+  });
+  toast("Geldeingang gelöscht.");
+  await loadIncome();
 }
 
 async function loadMyReceipts() {
@@ -1562,6 +1703,10 @@ $("loginBtn").addEventListener("click", handleLogin);
 $("registerBtn").addEventListener("click", handleRegister);
 $("logoutBtn").addEventListener("click", handleLogout);
 $("submitReceiptBtn").addEventListener("click", submitReceipt);
+$("saveIncomeBtn").addEventListener("click", saveIncome);
+$("incomeChannel").addEventListener("change", () => {
+  $("incomeAccountWrap").classList.toggle("hidden", $("incomeChannel").value !== "bank");
+});
 
 $("receiptFile").addEventListener("change", async (event) => {
   const file = event.target.files[0];
