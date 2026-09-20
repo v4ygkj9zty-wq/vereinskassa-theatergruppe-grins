@@ -145,11 +145,14 @@ async function loadReferences() {
     .map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>")
     .join("");
 
-  $("dashboardAccount").innerHTML =
+  const accountOptions =
     '<option value="">Alle Konten</option>' +
     bankAccounts
       .map((item) => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>")
       .join("");
+
+  $("dashboardAccount").innerHTML = accountOptions;
+  if ($("auditAccount")) $("auditAccount").innerHTML = accountOptions;
 }
 
 function buildNavigation() {
@@ -160,6 +163,7 @@ function buildNavigation() {
 
   if (financeRoles.includes(currentProfile.role)) {
     items.push(["dashboard", "Dashboard"]);
+    items.push(["audit", "Kassenprüfung / Export"]);
   }
   if (editRoles.includes(currentProfile.role)) {
     items.push(["payouts", "Auszahlungen"]);
@@ -193,6 +197,7 @@ async function showView(viewName) {
   if (viewName === "dashboard") await loadDashboard();
   if (viewName === "payouts") await loadPayouts();
   if (viewName === "bank") await loadBank();
+  if (viewName === "audit") await loadAudit();
   if (viewName === "members") await loadMembers();
 }
 
@@ -849,13 +854,17 @@ async function markPaid(id) {
 async function loadBank() {
   await loadReferences();
 
-  const transactionResult = await sb
-    .from("bank_transactions")
-    .select("*")
-    .order("booking_date", { ascending: false })
-    .limit(1000);
+  const [transactionResult, receiptResult] = await Promise.all([
+    sb.from("bank_transactions").select("*").order("booking_date", { ascending: false }).limit(1000),
+    sb.from("receipts").select("*").in("status", ["approved", "paid"]).order("receipt_date", { ascending: false })
+  ]);
 
   if (transactionResult.error) return toast(transactionResult.error.message, true);
+  if (receiptResult.error) return toast(receiptResult.error.message, true);
+
+  const transactions = transactionResult.data || [];
+  const receipts = receiptResult.data || [];
+  const alreadyLinked = new Set(transactions.map((item) => item.receipt_id).filter(Boolean));
 
   $("bankAccounts").innerHTML = bankAccounts
     .map((account) => {
@@ -875,7 +884,7 @@ async function loadBank() {
     button.addEventListener("click", () => editBankAccount(button.dataset.id));
   });
 
-  const missing = (transactionResult.data || []).filter(
+  const missing = transactions.filter(
     (item) => Number(item.amount) < 0 && !item.receipt_id
   );
 
@@ -883,6 +892,35 @@ async function loadBank() {
     ? missing
         .slice(0, 100)
         .map((item) => {
+          const candidates = receipts
+            .filter((receipt) => {
+              if (alreadyLinked.has(receipt.id)) return false;
+              const sameAmount = Math.abs(Math.abs(Number(item.amount)) - Number(receipt.amount)) < 0.01;
+              const closeDate = daysApart(receiptAccountingDate(receipt), item.booking_date) <= 14;
+              return sameAmount && closeDate;
+            })
+            .slice(0, 10);
+
+          const select =
+            '<select class="bank-match-select" data-tx="' +
+            escapeHtml(item.id) +
+            '"><option value="">– Beleg auswählen –</option>' +
+            candidates
+              .map(
+                (receipt) =>
+                  '<option value="' +
+                  escapeHtml(receipt.id) +
+                  '">' +
+                  escapeHtml(receiptNumber(receipt)) +
+                  " · " +
+                  escapeHtml(receipt.merchant || "Ohne Händler") +
+                  " · " +
+                  euro(receipt.amount) +
+                  "</option>"
+              )
+              .join("") +
+            "</select>";
+
           return (
             '<div class="list-row"><div><strong>' +
             escapeHtml(item.description || "Buchung") +
@@ -890,13 +928,50 @@ async function loadBank() {
             escapeHtml(item.booking_date) +
             " · " +
             escapeHtml(item.counterparty || "") +
-            '</div></div><strong class="money">' +
+            (item.external_reference
+              ? " · Bank-Ref. " + escapeHtml(item.external_reference)
+              : "") +
+            '</div><div class="bank-match-box">' +
+            select +
+            '<button class="btn btn-primary bank-link-btn" data-tx="' +
+            escapeHtml(item.id) +
+            '">Zuordnen</button></div></div><strong class="money">' +
             euro(item.amount) +
             "</strong></div>"
           );
         })
         .join("")
     : '<p class="hint">Keine offenen Bankausgaben ohne Beleg.</p>';
+
+  document.querySelectorAll(".bank-link-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const transactionId = button.dataset.tx;
+      const select = document.querySelector('.bank-match-select[data-tx="' + transactionId + '"]');
+      const receiptId = select?.value || "";
+      if (!receiptId) return toast("Bitte zuerst einen Vereinsbeleg auswählen.", true);
+      await linkBankTransaction(transactionId, receiptId);
+    });
+  });
+}
+
+async function linkBankTransaction(transactionId, receiptId) {
+  const result = await sb
+    .from("bank_transactions")
+    .update({ receipt_id: receiptId })
+    .eq("id", transactionId);
+
+  if (result.error) return toast("Zuordnung fehlgeschlagen: " + result.error.message, true);
+
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id,
+    entity_type: "bank_transaction",
+    entity_id: transactionId,
+    action: "linked_receipt",
+    details: { receipt_id: receiptId }
+  });
+
+  toast("Bankbuchung und Vereinsbeleg wurden zugeordnet.");
+  await loadBank();
 }
 
 async function editBankAccount(id) {
@@ -943,7 +1018,7 @@ async function handleBankFile(file) {
     return;
   }
 
-  const mappingIds = ["mapDate", "mapAmount", "mapDescription", "mapCounterparty"];
+  const mappingIds = ["mapDate", "mapAmount", "mapDescription", "mapCounterparty", "mapReference"];
   mappingIds.forEach((id) => {
     $(id).innerHTML =
       '<option value="">–</option>' +
@@ -957,6 +1032,7 @@ async function handleBankFile(file) {
   $("mapAmount").value = findHeader(/betrag|amount|umsatz|wert/i);
   $("mapDescription").value = findHeader(/verwendung|text|beschreibung|zweck|buchung/i);
   $("mapCounterparty").value = findHeader(/empf|auftrag|gegen|partner|name/i);
+  $("mapReference").value = findHeader(/beleg|referenz|reference|ref\.?|transaktion|umsatz.?id|buchungs.?id/i);
 
   $("mappingBox").classList.remove("hidden");
 
@@ -982,6 +1058,7 @@ async function importBankCsv() {
   const amountColumn = $("mapAmount").value;
   const descriptionColumn = $("mapDescription").value;
   const counterpartyColumn = $("mapCounterparty").value;
+  const referenceColumn = $("mapReference").value;
   const file = $("bankFile").files[0];
 
   if (!accountId || !dateColumn || !amountColumn || !file) {
@@ -1034,6 +1111,7 @@ async function importBankCsv() {
 
     const description = descriptionColumn ? String(row[descriptionColumn] || "").trim() : "";
     const counterparty = counterpartyColumn ? String(row[counterpartyColumn] || "").trim() : "";
+    const externalReference = referenceColumn ? String(row[referenceColumn] || "").trim() : "";
 
     rows.push({
       bank_account_id: accountId,
@@ -1042,6 +1120,7 @@ async function importBankCsv() {
       amount,
       description,
       counterparty,
+      external_reference: externalReference || null,
       kind: amount >= 0 ? "income" : "expense",
       fingerprint: await fingerprint(
         accountId + "|" + bookingDate + "|" + amount.toFixed(2) + "|" + description + "|" + counterparty
@@ -1084,6 +1163,262 @@ async function importBankCsv() {
   await loadBank();
 }
 
+
+let auditRowsCache = [];
+
+async function loadAudit() {
+  await loadReferences();
+
+  const [receiptResult, transactionResult] = await Promise.all([
+    sb.from("receipts")
+      .select("*,categories(name),profiles!receipts_submitted_by_fkey(display_name),receipt_files(*)")
+      .in("status", ["approved", "paid"])
+      .order("receipt_date", { ascending: false }),
+    sb.from("bank_transactions").select("*").order("booking_date", { ascending: false })
+  ]);
+
+  if (receiptResult.error) return toast(receiptResult.error.message, true);
+  if (transactionResult.error) return toast(transactionResult.error.message, true);
+
+  const receipts = receiptResult.data || [];
+  const transactions = transactionResult.data || [];
+  const years = new Set([new Date().getFullYear()]);
+
+  receipts.forEach((receipt) => {
+    const date = receiptAccountingDate(receipt);
+    if (date) years.add(Number(date.slice(0, 4)));
+  });
+  transactions.forEach((transaction) => {
+    if (transaction.booking_date) years.add(Number(transaction.booking_date.slice(0, 4)));
+  });
+
+  const selectedYear = Number($("auditYear").value || Math.max(...years));
+  $("auditYear").innerHTML = Array.from(years)
+    .sort((a, b) => b - a)
+    .map((year) => '<option value="' + year + '"' + (year === selectedYear ? " selected" : "") + ">" + year + "</option>")
+    .join("");
+
+  const selectedAccount = $("auditAccount").value || "";
+
+  auditRowsCache = receipts
+    .filter((receipt) => {
+      const date = receiptAccountingDate(receipt);
+      return date && Number(date.slice(0, 4)) === selectedYear;
+    })
+    .map((receipt) => {
+      const bankTransaction =
+        transactions.find((transaction) => transaction.receipt_id === receipt.id) || null;
+      const bankAccount = bankTransaction
+        ? bankAccounts.find((account) => account.id === bankTransaction.bank_account_id) || null
+        : null;
+
+      return {
+        receipt,
+        bankTransaction,
+        bankAccount
+      };
+    })
+    .filter((row) => {
+      if (!selectedAccount) return true;
+      return row.bankTransaction?.bank_account_id === selectedAccount;
+    })
+    .sort((a, b) => {
+      const da = receiptAccountingDate(a.receipt);
+      const db = receiptAccountingDate(b.receipt);
+      return String(da).localeCompare(String(db));
+    });
+
+  const total = auditRowsCache.reduce((sum, row) => sum + Number(row.receipt.amount), 0);
+  const linked = auditRowsCache.filter((row) => row.bankTransaction).length;
+  const unlinked = auditRowsCache.length - linked;
+
+  $("auditSummary").innerHTML =
+    '<strong>' +
+    auditRowsCache.length +
+    " Belege · " +
+    euro(total) +
+    '</strong><span class="hint">' +
+    linked +
+    " mit Bankbuchung verknüpft · " +
+    unlinked +
+    " noch ohne Bankbeleg</span>";
+
+  $("auditTable").innerHTML = auditRowsCache.length
+    ? '<table class="audit-table"><thead><tr>' +
+      "<th>Datum</th>" +
+      "<th>Vereins-Belegnr.</th>" +
+      "<th>Händler / Zweck</th>" +
+      "<th>Betrag</th>" +
+      "<th>Zahlungsart</th>" +
+      "<th>Bankdatum</th>" +
+      "<th>Bank-Belegnr. / Referenz</th>" +
+      "<th>Konto</th>" +
+      "<th>Status</th>" +
+      "<th>Beleg</th>" +
+      "</tr></thead><tbody>" +
+      auditRowsCache
+        .map((row) => {
+          const receipt = row.receipt;
+          const bank = row.bankTransaction;
+          const file = receipt.receipt_files?.[0];
+          return (
+            "<tr>" +
+            "<td>" +
+            escapeHtml(formatDate(receiptAccountingDate(receipt))) +
+            "</td>" +
+            "<td><strong>" +
+            escapeHtml(receiptNumber(receipt)) +
+            "</strong></td>" +
+            "<td>" +
+            escapeHtml(receipt.merchant || "") +
+            '<div class="hint">' +
+            escapeHtml(receipt.purpose || "") +
+            "</div></td>" +
+            '<td class="money">' +
+            euro(receipt.amount) +
+            "</td>" +
+            "<td>" +
+            escapeHtml(paymentLabel(receipt.payment_method)) +
+            "</td>" +
+            "<td>" +
+            escapeHtml(bank ? formatDate(bank.booking_date) : "–") +
+            "</td>" +
+            "<td>" +
+            escapeHtml(bank?.external_reference || (bank ? bank.description || "–" : "–")) +
+            "</td>" +
+            "<td>" +
+            escapeHtml(row.bankAccount?.name || "–") +
+            "</td>" +
+            "<td>" +
+            statusBadge(receipt.status) +
+            "</td>" +
+            "<td>" +
+            (file
+              ? '<button class="btn btn-secondary audit-file-btn" data-path="' +
+                escapeHtml(file.item_id) +
+                '">Öffnen</button>'
+              : "–") +
+            "</td>" +
+            "</tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table>"
+    : '<p class="hint">Für diese Auswahl sind keine freigegebenen Belege vorhanden.</p>';
+
+  document.querySelectorAll(".audit-file-btn").forEach((button) => {
+    button.addEventListener("click", () => openReceiptFile(button.dataset.path));
+  });
+}
+
+function formatDate(isoDate) {
+  if (!isoDate) return "";
+  const parts = String(isoDate).slice(0, 10).split("-");
+  if (parts.length !== 3) return isoDate;
+  return parts[2] + "." + parts[1] + "." + parts[0];
+}
+
+function csvCell(value) {
+  const text = String(value ?? "").replace(/"/g, '""');
+  return '"' + text + '"';
+}
+
+function exportAuditCsv() {
+  const header = [
+    "Datum",
+    "Vereins-Belegnummer",
+    "Händler",
+    "Verwendungszweck",
+    "Betrag",
+    "Zahlungsart",
+    "Bankdatum",
+    "Bank-Belegnummer/Referenz",
+    "Konto",
+    "Status"
+  ];
+
+  const lines = [header.map(csvCell).join(";")];
+
+  auditRowsCache.forEach((row) => {
+    const receipt = row.receipt;
+    const bank = row.bankTransaction;
+    lines.push(
+      [
+        formatDate(receiptAccountingDate(receipt)),
+        receiptNumber(receipt),
+        receipt.merchant || "",
+        receipt.purpose || "",
+        Number(receipt.amount).toFixed(2).replace(".", ","),
+        paymentLabel(receipt.payment_method),
+        bank ? formatDate(bank.booking_date) : "",
+        bank?.external_reference || (bank ? bank.description || "" : ""),
+        row.bankAccount?.name || "",
+        receipt.status
+      ]
+        .map(csvCell)
+        .join(";")
+    );
+  });
+
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], {
+    type: "text/csv;charset=utf-8"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "Theatergruppe_Grins_Kassenpruefung_" + ($("auditYear").value || "alle") + ".csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function printAudit() {
+  if (!auditRowsCache.length) return toast("Keine Daten zum Drucken vorhanden.", true);
+
+  const total = auditRowsCache.reduce((sum, row) => sum + Number(row.receipt.amount), 0);
+  const rows = auditRowsCache
+    .map((row) => {
+      const receipt = row.receipt;
+      const bank = row.bankTransaction;
+      return (
+        "<tr>" +
+        "<td>" + escapeHtml(formatDate(receiptAccountingDate(receipt))) + "</td>" +
+        "<td>" + escapeHtml(receiptNumber(receipt)) + "</td>" +
+        "<td>" + escapeHtml(receipt.merchant || "") + "<br><small>" + escapeHtml(receipt.purpose || "") + "</small></td>" +
+        "<td style=\"text-align:right\">" + escapeHtml(euro(receipt.amount)) + "</td>" +
+        "<td>" + escapeHtml(paymentLabel(receipt.payment_method)) + "</td>" +
+        "<td>" + escapeHtml(bank ? formatDate(bank.booking_date) : "–") + "</td>" +
+        "<td>" + escapeHtml(bank?.external_reference || (bank ? bank.description || "–" : "–")) + "</td>" +
+        "<td>" + escapeHtml(row.bankAccount?.name || "–") + "</td>" +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return toast("Popup wurde blockiert. Bitte Popups für diese Seite erlauben.", true);
+
+  printWindow.document.write(
+    '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Kassenprüfung Theatergruppe Grins</title>' +
+    "<style>body{font-family:Arial,sans-serif;color:#111;margin:24px}h1{font-size:20px;margin-bottom:4px}p{margin:4px 0 14px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #bbb;padding:5px;vertical-align:top}th{background:#eee}tfoot td{font-weight:bold}small{color:#555}@page{size:landscape;margin:10mm}</style>" +
+    "</head><body><h1>Theatergruppe Grins – Kassenprüfung</h1>" +
+    "<p>Jahr: " +
+    escapeHtml($("auditYear").value || "") +
+    " · Erstellt am " +
+    escapeHtml(new Date().toLocaleDateString("de-AT")) +
+    "</p><table><thead><tr>" +
+    "<th>Datum</th><th>Vereins-Belegnr.</th><th>Händler / Zweck</th><th>Betrag</th><th>Zahlungsart</th><th>Bankdatum</th><th>Bank-Belegnr. / Referenz</th><th>Konto</th>" +
+    "</tr></thead><tbody>" +
+    rows +
+    '</tbody><tfoot><tr><td colspan="3">Summe</td><td style="text-align:right">' +
+    escapeHtml(euro(total)) +
+    '</td><td colspan="4"></td></tr></tfoot></table></body></html>'
+  );
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
 async function loadMembers() {
   const result = await sb.from("profiles").select("*").order("display_name");
 
@@ -1165,6 +1500,10 @@ $("receiptFile").addEventListener("change", async (event) => {
 
 $("dashboardYear").addEventListener("change", loadDashboard);
 $("dashboardAccount").addEventListener("change", loadDashboard);
+$("auditYear").addEventListener("change", loadAudit);
+$("auditAccount").addEventListener("change", loadAudit);
+$("auditCsvBtn").addEventListener("click", exportAuditCsv);
+$("auditPrintBtn").addEventListener("click", printAudit);
 
 $("bankFile").addEventListener("change", (event) => {
   handleBankFile(event.target.files[0]);
