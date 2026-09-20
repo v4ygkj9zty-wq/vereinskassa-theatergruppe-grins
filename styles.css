@@ -56,3 +56,9 @@ textarea{min-height:86px;resize:vertical}
 .audit-table td,.audit-table th{vertical-align:top}
 .audit-table .hint{white-space:normal;min-width:180px}
 @media(max-width:800px){.list-row{flex-direction:column}.list-actions{width:100%}.audit-header{flex-direction:column}.bank-match-box{grid-template-columns:1fr}.audit-table{min-width:1050px}}
+
+.payout-details{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.payout-details>div{background:#f7fbfb;border:1px solid #dce8e8;border-radius:9px;padding:8px}
+.payout-details span{display:block;font-size:11px;color:#61777d;margin-bottom:3px}
+.payout-details strong{font-size:13px;word-break:break-word}
+@media(max-width:600px){.payout-details{grid-template-columns:1fr}}
