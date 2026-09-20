@@ -230,6 +230,7 @@ async function enterApp() {
   currentProfile = profileResult.data;
   $("helloText").textContent = "Hallo " + currentProfile.display_name;
   $("roleText").textContent = roleLabel(currentProfile.role);
+  renderIbanStatus();
 
   try {
     await loadReferences();
@@ -238,6 +239,37 @@ async function enterApp() {
   } catch (error) {
     toast("Daten konnten nicht geladen werden: " + error.message, true);
   }
+}
+
+function formatIban(iban) {
+  return String(iban || "").replace(/\s/g, "").replace(/(.{4})/g, "$1 ").trim();
+}
+
+function renderIbanStatus() {
+  if (!$("ibanStatus")) return;
+  $("ibanStatus").textContent = currentProfile?.iban
+    ? "IBAN: " + formatIban(currentProfile.iban)
+    : "IBAN noch nicht hinterlegt";
+}
+
+async function editOwnIban() {
+  const value = window.prompt(
+    "Deine IBAN für Rückerstattungen:",
+    currentProfile?.iban ? formatIban(currentProfile.iban) : ""
+  );
+  if (value === null) return;
+
+  const iban = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (iban && !/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(iban)) {
+    return toast("Bitte eine gültige IBAN eingeben.", true);
+  }
+
+  const result = await sb.from("profiles").update({ iban: iban || null }).eq("id", currentUser.id).select().single();
+  if (result.error) return toast("IBAN konnte nicht gespeichert werden: " + result.error.message, true);
+
+  currentProfile = result.data;
+  renderIbanStatus();
+  toast("IBAN wurde gespeichert.");
 }
 
 async function handleLogin() {
@@ -1004,7 +1036,7 @@ async function rejectReceipt(id) {
 async function loadPayouts() {
   const result = await sb
     .from("receipts")
-    .select("*,profiles!receipts_submitted_by_fkey(display_name)")
+    .select("*,profiles!receipts_submitted_by_fkey(display_name,iban)")
     .eq("status", "approved")
     .eq("payment_method", "private_reimbursement")
     .order("approved_at");
@@ -1027,10 +1059,18 @@ async function loadPayouts() {
         escapeHtml(receiptNumber(receipt)) +
         " · " +
         escapeHtml(receipt.purpose) +
-        "</div></div>" +
+        '</div><div class="payout-details"><div><span>IBAN</span><strong>' +
+        escapeHtml(receipt.profiles?.iban ? formatIban(receipt.profiles.iban) : "NICHT HINTERLEGT") +
+        '</strong></div><div><span>Zahlungsreferenz</span><strong>' +
+        escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
+        '</strong></div></div></div>' +
         '<div class="list-actions"><strong class="money">' +
         euro(receipt.amount) +
-        '</strong><button class="btn btn-primary paid-btn" data-id="' +
+        '</strong><button class="btn btn-secondary copy-payment-btn" data-iban="' +
+        escapeHtml(receipt.profiles?.iban || "") +
+        '" data-reference="' +
+        escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
+        '">Überweisungsdaten kopieren</button><button class="btn btn-primary paid-btn" data-id="' +
         escapeHtml(receipt.id) +
         '">Als ausbezahlt markieren</button></div></div>'
       );
@@ -1039,6 +1079,20 @@ async function loadPayouts() {
 
   document.querySelectorAll(".paid-btn").forEach((button) => {
     button.addEventListener("click", () => markPaid(button.dataset.id));
+  });
+  document.querySelectorAll(".copy-payment-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!button.dataset.iban) return toast("Bei diesem Mitglied ist noch keine IBAN hinterlegt.", true);
+      const text = "IBAN: " + formatIban(button.dataset.iban) + "\nBetrag: " +
+        button.closest(".list-row").querySelector(".money").textContent +
+        "\nZahlungsreferenz: " + button.dataset.reference;
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Überweisungsdaten wurden kopiert.");
+      } catch {
+        window.prompt("Überweisungsdaten:", text);
+      }
+    });
   });
 }
 
@@ -1702,6 +1756,7 @@ $("toggleRegisterBtn").addEventListener("click", () => {
 $("loginBtn").addEventListener("click", handleLogin);
 $("registerBtn").addEventListener("click", handleRegister);
 $("logoutBtn").addEventListener("click", handleLogout);
+$("editOwnIbanBtn").addEventListener("click", editOwnIban);
 $("submitReceiptBtn").addEventListener("click", submitReceipt);
 $("saveIncomeBtn").addEventListener("click", saveIncome);
 $("incomeChannel").addEventListener("change", () => {
