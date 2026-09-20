@@ -1296,14 +1296,16 @@ async function resolveWithoutReceipt(transactionId) {
     "2": ["historical_not_in_app", "Historischer Beleg - nicht in dieser App erfasst"],
     "3": ["bank_document_sufficient", "Bankauszug / Bankbeleg ist der Nachweis"],
     "4": ["no_external_receipt", "Kein Fremdbeleg vorhanden - interner Nachweis"],
-    "5": ["other", "Sonstiger Grund"]
+    "5": ["capital_gains_tax_bank_document", "KESt / Kapitalertragsteuer - Bankauszug ist Beleg"],
+    "6": ["bank_fees_bank_document", "Bankspesen / Kontofuehrung - Bankauszug ist Beleg"],
+    "7": ["other", "Sonstiger Grund"]
   };
-  const answer = window.prompt("Kein Beleg / Ausnahme:\n1 = Interne Umbuchung\n2 = Historischer Beleg, nicht in App\n3 = Bankauszug ist Nachweis\n4 = Kein Fremdbeleg vorhanden\n5 = Sonstiger Grund\n\nNummer eingeben:");
+  const answer = window.prompt("Kein Beleg / Ausnahme:\n1 = Interne Umbuchung\n2 = Historischer Beleg, nicht in App\n3 = Bankauszug ist Nachweis\n4 = Kein Fremdbeleg vorhanden\n5 = KESt / Kapitalertragsteuer - Bankauszug ist Beleg\n6 = Bankspesen / Kontofuehrung - Bankauszug ist Beleg\n7 = Sonstiger Grund\n\nNummer eingeben:");
   if (answer === null) return;
   const selected = reasons[answer.trim()];
-  if (!selected) return toast("Bitte 1 bis 5 auswaehlen.", true);
+  if (!selected) return toast("Bitte 1 bis 7 auswaehlen.", true);
   let note = selected[1];
-  if (answer.trim() === "4" || answer.trim() === "5") {
+  if (answer.trim() === "4" || answer.trim() === "7") {
     const entered = window.prompt("Kurze Bemerkung / Begruendung:");
     if (entered === null || !entered.trim()) return toast("Bitte eine kurze Begruendung eintragen.", true);
     note = entered.trim();
