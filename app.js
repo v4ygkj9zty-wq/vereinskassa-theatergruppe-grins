@@ -518,6 +518,13 @@ async function loadMyReceipts() {
             escapeHtml(file.item_id) +
             '">Beleg</button>'
           : "") +
+        (editRoles.includes(currentProfile.role)
+          ? '<button class="btn btn-secondary edit-receipt-btn" data-id="' +
+            escapeHtml(receipt.id) +
+            '">Bearbeiten</button><button class="btn btn-danger delete-receipt-btn" data-id="' +
+            escapeHtml(receipt.id) +
+            '">Löschen</button>'
+          : "") +
         "</div>" +
         "</div>"
       );
@@ -527,6 +534,74 @@ async function loadMyReceipts() {
   document.querySelectorAll(".open-file-btn").forEach((button) => {
     button.addEventListener("click", () => openReceiptFile(button.dataset.path));
   });
+  document.querySelectorAll(".edit-receipt-btn").forEach((button) => {
+    button.addEventListener("click", () => editReceipt(button.dataset.id));
+  });
+  document.querySelectorAll(".delete-receipt-btn").forEach((button) => {
+    button.addEventListener("click", () => deleteReceipt(button.dataset.id));
+  });
+}
+
+async function editReceipt(id) {
+  const result = await sb.from("receipts").select("*").eq("id", id).single();
+  if (result.error) return toast(result.error.message, true);
+  const receipt = result.data;
+  const merchant = window.prompt("Geschäft / Lieferant:", receipt.merchant || "");
+  if (merchant === null) return;
+  const date = window.prompt("Belegdatum (JJJJ-MM-TT):", receipt.receipt_date || "");
+  if (date === null) return;
+  const amountText = window.prompt("Betrag (€):", String(receipt.amount || ""));
+  if (amountText === null) return;
+  const amount = parseMoney(amountText);
+  if (!Number.isFinite(amount) || amount <= 0) return toast("Ungültiger Betrag.", true);
+  const purpose = window.prompt("Verwendungszweck:", receipt.purpose || "");
+  if (purpose === null || !purpose.trim()) return;
+  const invoiceNumber = window.prompt("Rechnungs-/Belegnummer:", receipt.invoice_number || "");
+  if (invoiceNumber === null) return;
+
+  const update = await sb.from("receipts").update({
+    merchant: merchant.trim() || null,
+    receipt_date: date || null,
+    amount,
+    purpose: purpose.trim(),
+    invoice_number: invoiceNumber.trim() || null
+  }).eq("id", id);
+  if (update.error) return toast("Änderung fehlgeschlagen: " + update.error.message, true);
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id, entity_type: "receipt", entity_id: id,
+    action: "edited", details: { merchant, date, amount, purpose, invoice_number: invoiceNumber }
+  });
+  toast("Beleg wurde geändert.");
+  await loadMyReceipts();
+}
+
+async function deleteReceipt(id) {
+  if (!window.confirm("Beleg wirklich löschen? Die Löschung kann nicht rückgängig gemacht werden.")) return;
+
+  const txResult = await sb.from("bank_transactions").select("id").eq("receipt_id", id).limit(1);
+  if (txResult.error) return toast(txResult.error.message, true);
+  if ((txResult.data || []).length) {
+    return toast("Der Beleg ist bereits einer Bankbuchung zugeordnet. Bitte zuerst die Zuordnung lösen.", true);
+  }
+
+  const fileResult = await sb.from("receipt_files").select("item_id").eq("receipt_id", id);
+  if (fileResult.error) return toast(fileResult.error.message, true);
+  const paths = (fileResult.data || []).map((x) => x.item_id).filter(Boolean);
+
+  await sb.from("audit_log").insert({
+    actor_id: currentUser.id, entity_type: "receipt", entity_id: id,
+    action: "deleted", details: {}
+  });
+
+  const del = await sb.from("receipts").delete().eq("id", id);
+  if (del.error) return toast("Löschen fehlgeschlagen: " + del.error.message, true);
+
+  if (paths.length) {
+    const storageDelete = await sb.storage.from("receipt-files").remove(paths);
+    if (storageDelete.error) console.warn(storageDelete.error.message);
+  }
+  toast("Beleg wurde gelöscht.");
+  await loadMyReceipts();
 }
 
 function receiptAccountingDate(receipt) {
