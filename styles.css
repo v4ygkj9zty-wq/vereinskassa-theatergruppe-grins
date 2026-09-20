@@ -37,3 +37,22 @@ textarea{min-height:86px;resize:vertical}
 #toast{position:fixed;right:14px;bottom:14px;max-width:340px;background:#17313a;color:#fff;padding:12px 14px;border-radius:12px;box-shadow:0 10px 30px #0004;display:none;z-index:100}
 @media(max-width:800px){.stats-grid{grid-template-columns:1fr 1fr}.two-col{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.row{flex-direction:column}.actions{width:100%}.actions .btn{flex:1}}
 @media(max-width:520px){.wrap{padding:10px}.stats-grid{grid-template-columns:1fr}.filters{grid-template-columns:1fr}.topbar-inner{align-items:flex-start}.card{border-radius:13px}}
+
+.list-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid #edf2f2}
+.list-row:last-child{border-bottom:0}
+.list-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.status{display:inline-block;font-size:12px;font-weight:750;border-radius:999px;padding:4px 8px}
+.status.submitted{background:#fff3cd;color:#795b00}
+.status.approved{background:#dcfce7;color:#166534}
+.status.paid{background:#dbeafe;color:#1e40af}
+.status.rejected{background:#fee2e2;color:#991b1b}
+.error-text{color:#b91c1c}.success-text{color:#15803d}
+#toast.show{display:block}
+.month-value span{display:block;font-size:11px;color:#60767d;margin-bottom:3px}
+.expense-bar{background:#b45309!important}
+.bank-match-box{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;margin-top:9px;align-items:center}
+.audit-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.audit-summary{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:14px 0;padding:10px 12px;background:#f7fbfb;border:1px solid #dce8e8;border-radius:10px}
+.audit-table td,.audit-table th{vertical-align:top}
+.audit-table .hint{white-space:normal;min-width:180px}
+@media(max-width:800px){.list-row{flex-direction:column}.list-actions{width:100%}.audit-header{flex-direction:column}.bank-match-box{grid-template-columns:1fr}.audit-table{min-width:1050px}}
