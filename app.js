@@ -1431,8 +1431,9 @@ async function resolveIncomeWithoutReceipt(transactionId) {
     "1": ["not_required_transfer", "Interne Umbuchung - kein zusaetzlicher Beleg erforderlich"],
     "2": ["historical_not_in_app", "Historischer Eingang - nicht in dieser App erfasst"],
     "3": ["bank_document_sufficient", "Bankauszug / Bankbeleg ist der Nachweis"],
-    "4": ["no_external_receipt", "Kein separater Eingangsbeleg vorhanden - interner Nachweis"],
-    "5": ["other", "Sonstiger Grund"]
+    "4": ["bank_document_sufficient", "Spende ohne separaten Beleg - Bankeingang ist Nachweis"],
+    "5": ["no_external_receipt", "Kein separater Eingangsbeleg vorhanden - interner Nachweis"],
+    "6": ["other", "Sonstiger Grund"]
   };
   const answer = window.prompt(
     "Eingang ohne separaten Beleg:\\n" +
@@ -1444,10 +1445,10 @@ async function resolveIncomeWithoutReceipt(transactionId) {
   );
   if (answer === null) return;
   const selected = reasons[answer.trim()];
-  if (!selected) return toast("Bitte 1 bis 5 auswaehlen.", true);
+  if (!selected) return toast("Bitte 1 bis 6 auswaehlen.", true);
 
   let note = selected[1];
-  if (answer.trim() === "4" || answer.trim() === "5") {
+  if (answer.trim() === "5" || answer.trim() === "6") {
     const entered = window.prompt("Kurze Bemerkung / Begruendung:");
     if (entered === null || !entered.trim()) return toast("Bitte eine kurze Begruendung eintragen.", true);
     note = entered.trim();
