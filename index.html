@@ -159,6 +159,7 @@
             <div><label for="mapAmount">Betragsspalte</label><select id="mapAmount"></select></div>
             <div><label for="mapDescription">Buchungstext</label><select id="mapDescription"></select></div>
             <div><label for="mapCounterparty">Gegenpartei</label><select id="mapCounterparty"></select></div>
+            <div><label for="mapReference">Bank-Belegnummer / Referenz</label><select id="mapReference"></select></div>
           </div>
           <div id="bankPreview" class="table-wrap"></div>
           <button id="importBankBtn" class="btn btn-primary">Importieren</button>
@@ -168,6 +169,33 @@
       <section class="card">
         <h2>Beleg fehlt / Zuordnung</h2>
         <div id="missingReceipts"></div>
+      </section>
+    </section>
+
+    <section id="view-audit" class="app-view hidden">
+      <section class="card">
+        <div class="audit-header">
+          <div>
+            <h2>Kassenprüfung / Export</h2>
+            <p class="hint">Vereinsbeleg und Bankbeleg nebeneinander – für Kontrolle, Ausdruck oder PDF.</p>
+          </div>
+          <div class="button-row">
+            <button id="auditPrintBtn" class="btn btn-secondary">Drucken / PDF</button>
+            <button id="auditCsvBtn" class="btn btn-primary">CSV Export</button>
+          </div>
+        </div>
+        <div class="filters">
+          <div>
+            <label for="auditYear">Jahr</label>
+            <select id="auditYear"></select>
+          </div>
+          <div>
+            <label for="auditAccount">Konto</label>
+            <select id="auditAccount"></select>
+          </div>
+        </div>
+        <div id="auditSummary" class="audit-summary"></div>
+        <div id="auditTable" class="table-wrap"></div>
       </section>
     </section>
 
