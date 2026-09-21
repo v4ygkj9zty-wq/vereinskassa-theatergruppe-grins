@@ -1,0 +1,44 @@
+name: Secure VereinsKassa backup bridge
+on:
+  push:
+    paths:
+      - '.github/workflows/backup-bridge.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request GitHub OIDC token and export backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          OIDC_JSON=$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=vereinskassa-backup")
+          TOKEN=$(printf '%s' "$OIDC_JSON" | jq -r '.value')
+          test -n "$TOKEN" && test "$TOKEN" != "null"
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer ${TOKEN}" \
+            'https://joqolbaxxqgcyrcytkbj.supabase.co/functions/v1/vereinskassa-backup-export' \
+            --output VereinsKassa_Backup_2026-09-21.zip
+          unzip -t VereinsKassa_Backup_2026-09-21.zip
+          mkdir -p extracted
+          unzip -q VereinsKassa_Backup_2026-09-21.zip -d extracted
+          cat extracted/manifest.json
+          if [ -d extracted/receipts/2026 ]; then
+            (cd extracted/receipts && zip -qr ../../VereinsKassa_Belege_2026.zip 2026)
+          fi
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vereinskassa-backup-2026-09-21
+          path: |
+            VereinsKassa_Backup_2026-09-21.zip
+            VereinsKassa_Belege_2026.zip
+            extracted/manifest.json
+          if-no-files-found: error
+          retention-days: 1
