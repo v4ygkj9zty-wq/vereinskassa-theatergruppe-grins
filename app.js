@@ -1973,71 +1973,88 @@ async function exportReceiptSheets() {
   const rows = auditRowsCache.filter((row) => row.receipt.receipt_files?.[0]);
   if (!rows.length) return toast("Für diese Auswahl sind keine hochgeladenen Belege vorhanden.", true);
 
-  toast("Belegübersicht wird vorbereitet …");
-
-  const cards = [];
-  for (const row of rows) {
-    const receipt = row.receipt;
-    const file = receipt.receipt_files?.[0];
-    let imageUrl = "";
-    let isPdf = false;
-
-    if (file?.item_id) {
-      const signed = await sb.storage.from("receipt-files").createSignedUrl(file.item_id, 900);
-      if (!signed.error) {
-        imageUrl = signed.data.signedUrl;
-        isPdf = String(file.mime_type || "").includes("pdf") || String(file.file_name || "").toLowerCase().endsWith(".pdf");
-      }
-    }
-
-    cards.push(
-      '<article class="receipt-card">' +
-      '<div class="receipt-media">' +
-      (imageUrl && !isPdf
-        ? '<img src="' + escapeHtml(imageUrl) + '" alt="Beleg">'
-        : '<div class="pdf-placeholder">' + (isPdf ? "PDF-BELEG" : "BELEG") + '</div>') +
-      '</div><div class="receipt-caption">' +
-      '<strong>' + escapeHtml(receiptNumber(receipt)) + '</strong>' +
-      '<span>' + escapeHtml(receipt.purpose || "") + '</span>' +
-      '<b>' + escapeHtml(euro(receipt.amount)) + '</b>' +
-      '<small>' + escapeHtml(formatDate(receiptAccountingDate(receipt))) +
-      (receipt.merchant ? " - " + escapeHtml(receipt.merchant) : "") + '</small>' +
-      (row.bankTransaction
-        ? '<small>Bank: ' + escapeHtml(formatDate(row.bankTransaction.booking_date)) +
-          ' - ' + escapeHtml(row.bankTransaction.external_reference || row.bankTransaction.description || "") + '</small>'
-        : '<small>Bankzuordnung: noch nicht verknüpft</small>') +
-      '</div></article>'
-    );
+  // Open immediately on the user's click. Mobile Safari blocks windows opened only
+  // after asynchronous storage requests have finished.
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    return toast("Das Belegblatt wurde vom Browser blockiert. Bitte Popups für diese Seite erlauben.", true);
   }
 
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return toast("Popup wurde blockiert. Bitte Popups erlauben.", true);
-
   printWindow.document.write(
-    '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht Theatergruppe Grins</title>' +
-    '<style>' +
-    '@page{size:A4 portrait;margin:8mm}' +
-    '*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}' +
-    '.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:7mm}' +
-    'h1{font-size:18px;margin:0 0 2px}p{font-size:10px;margin:0;color:#555}' +
-    '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}' +
-    '.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;min-height:83mm;display:flex;flex-direction:column}' +
-    '.receipt-media{height:58mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fafafa}' +
-    '.receipt-media img{width:100%;height:100%;object-fit:contain;object-position:center}' +
-    '.pdf-placeholder{border:1px dashed #aaa;padding:12mm 4mm;color:#777;font-weight:bold}' +
-    '.receipt-caption{padding-top:2mm;display:grid;gap:1mm;font-size:9px}' +
-    '.receipt-caption strong{font-size:10px}.receipt-caption b{font-size:10px}.receipt-caption small{font-size:8px;color:#444}' +
-    '@media print{.grid{grid-template-columns:repeat(3,1fr)}}' +
-    '</style></head><body>' +
-    '<div class="head"><div><h1>Theatergruppe Grins - Belegübersicht</h1>' +
-    '<p>Hochgeladene Belege mit Zuordnung zur VereinsKassa</p></div>' +
-    '<div><p>Jahr: ' + escapeHtml($("auditYear").value || "") + '</p>' +
-    '<p>Erstellt: ' + escapeHtml(new Date().toLocaleDateString("de-AT")) + '</p></div></div>' +
-    '<div class="grid">' + cards.join("") + '</div>' +
-    '<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),700));<\/script>' +
-    '</body></html>'
+    '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht</title>' +
+    '<style>body{font-family:Arial,sans-serif;padding:20px;color:#222}.loading{margin:30px auto;max-width:500px;text-align:center}</style>' +
+    '</head><body><div class="loading"><h2>Belegübersicht wird erstellt …</h2><p>Bitte dieses Fenster geöffnet lassen.</p></div></body></html>'
   );
   printWindow.document.close();
+
+  try {
+    const cards = [];
+    for (const row of rows) {
+      const receipt = row.receipt;
+      const file = receipt.receipt_files?.[0];
+      let imageUrl = "";
+      let isPdf = false;
+
+      if (file?.item_id) {
+        const signed = await sb.storage.from("receipt-files").createSignedUrl(file.item_id, 900);
+        if (!signed.error) {
+          imageUrl = signed.data.signedUrl;
+          isPdf = String(file.mime_type || "").includes("pdf") ||
+            String(file.file_name || "").toLowerCase().endsWith(".pdf");
+        }
+      }
+
+      cards.push(
+        '<article class="receipt-card"><div class="receipt-media">' +
+        (imageUrl && !isPdf
+          ? '<img src="' + escapeHtml(imageUrl) + '" alt="Beleg">'
+          : '<div class="pdf-placeholder">' + (isPdf ? "PDF-BELEG" : "BELEG NICHT VERFÜGBAR") + '</div>') +
+        '</div><div class="receipt-caption"><strong>' + escapeHtml(receiptNumber(receipt)) + '</strong>' +
+        '<span>' + escapeHtml(receipt.purpose || "") + '</span>' +
+        '<b>' + escapeHtml(euro(receipt.amount)) + '</b>' +
+        '<small>' + escapeHtml(formatDate(receiptAccountingDate(receipt))) +
+        (receipt.merchant ? " - " + escapeHtml(receipt.merchant) : "") + '</small>' +
+        (row.bankTransaction
+          ? '<small>Bank: ' + escapeHtml(formatDate(row.bankTransaction.booking_date)) +
+            ' - ' + escapeHtml(row.bankTransaction.external_reference || row.bankTransaction.description || "") + '</small>'
+          : '<small>Bankzuordnung: noch nicht verknüpft</small>') +
+        '</div></article>'
+      );
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht Theatergruppe Grins</title>' +
+      '<style>@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}' +
+      '.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:7mm}h1{font-size:18px;margin:0 0 2px}p{font-size:10px;margin:0;color:#555}' +
+      '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;min-height:83mm;display:flex;flex-direction:column}' +
+      '.receipt-media{height:58mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fafafa}.receipt-media img{width:100%;height:100%;object-fit:contain;object-position:center}' +
+      '.pdf-placeholder{border:1px dashed #aaa;padding:12mm 4mm;color:#777;font-weight:bold;text-align:center}.receipt-caption{padding-top:2mm;display:grid;gap:1mm;font-size:9px}' +
+      '.receipt-caption strong{font-size:10px}.receipt-caption b{font-size:10px}.receipt-caption small{font-size:8px;color:#444}</style></head><body>' +
+      '<div class="head"><div><h1>Theatergruppe Grins - Belegübersicht</h1><p>Hochgeladene Belege mit Zuordnung zur VereinsKassa</p></div>' +
+      '<div><p>Jahr: ' + escapeHtml($("auditYear").value || "") + '</p><p>Erstellt: ' +
+      escapeHtml(new Date().toLocaleDateString("de-AT")) + '</p></div></div><div class="grid">' +
+      cards.join("") + '</div></body></html>'
+    );
+    printWindow.document.close();
+
+    const images = Array.from(printWindow.document.images);
+    await Promise.all(images.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+        setTimeout(resolve, 5000);
+      });
+    }));
+
+    printWindow.focus();
+    printWindow.print();
+  } catch (error) {
+    console.error(error);
+    printWindow.close();
+    toast("Belegübersicht konnte nicht erstellt werden: " + error.message, true);
+  }
 }
 
 function printAudit() {
