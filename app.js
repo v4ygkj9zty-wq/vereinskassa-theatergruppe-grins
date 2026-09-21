@@ -2027,8 +2027,8 @@ async function exportReceiptSheets() {
       '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht Theatergruppe Grins</title>' +
       '<style>@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}' +
       '.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:7mm}h1{font-size:18px;margin:0 0 2px}p{font-size:10px;margin:0;color:#555}' +
-      '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;min-height:83mm;display:flex;flex-direction:column}' +
-      '.receipt-media{height:58mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fafafa}.receipt-media img{width:100%;height:100%;object-fit:contain;object-position:center}' +
+      '.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4mm}.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;min-height:128mm;display:flex;flex-direction:column}' +
+      '.receipt-media{height:96mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fafafa}.receipt-media img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;object-position:center}' +
       '.pdf-placeholder{border:1px dashed #aaa;padding:12mm 4mm;color:#777;font-weight:bold;text-align:center}.receipt-caption{padding-top:2mm;display:grid;gap:1mm;font-size:9px}' +
       '.receipt-caption strong{font-size:10px}.receipt-caption b{font-size:10px}.receipt-caption small{font-size:8px;color:#444}</style></head><body>' +
       '<div class="head"><div><h1>Theatergruppe Grins - Belegübersicht</h1><p>Hochgeladene Belege mit Zuordnung zur VereinsKassa</p></div>' +
@@ -2047,6 +2047,29 @@ async function exportReceiptSheets() {
         setTimeout(resolve, 5000);
       });
     }));
+
+    images.forEach((img) => {
+      const box = img.closest(".receipt-media");
+      if (!box || !img.naturalWidth || !img.naturalHeight) return;
+      const aspect = img.naturalHeight / img.naturalWidth;
+
+      // Long/narrow receipts need more width so the printed text remains readable.
+      // Wide/full-page documents are reduced to avoid oversized text.
+      if (aspect >= 2.8) {
+        img.style.width = "100%";
+        img.style.height = "auto";
+        img.style.maxHeight = "none";
+      } else if (aspect >= 1.8) {
+        img.style.width = "92%";
+        img.style.height = "auto";
+      } else if (aspect >= 1.15) {
+        img.style.width = "82%";
+        img.style.height = "auto";
+      } else {
+        img.style.width = "72%";
+        img.style.height = "auto";
+      }
+    });
 
     printWindow.focus();
     printWindow.print();
