@@ -457,6 +457,21 @@ async function prepareImageForOcr(file) {
   }
 }
 
+async function extractPdfNativeText(file) {
+  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const texts = [];
+  for (let pageNo = 1; pageNo <= Math.min(pdf.numPages, 5); pageNo++) {
+    const page = await pdf.getPage(pageNo);
+    const content = await page.getTextContent();
+    texts.push(content.items.map((item) => item.str || "").join(" "));
+  }
+  return texts.join("\\n").replace(/\s+/g, " ").trim();
+}
+
 async function pdfPagesForOcr(file) {
   const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc =
@@ -502,24 +517,54 @@ async function runOCR(file) {
 
   try {
     const Tesseract = await import("https://cdn.jsdelivr.net/npm/tesseract.js@5/+esm");
-    let ocrInput = file;
+    let text = "";
 
-    // PDF files are kept uploadable. Browser OCR is strongest on photos/images.
     if (file.type.startsWith("image/")) {
-      ocrInput = await prepareImageForOcr(file);
+      const ocrInput = await prepareImageForOcr(file);
+      const result = await Tesseract.recognize(ocrInput, "deu");
+      text = result.data.text || "";
+    } else if (String(file.type).includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) {
+      $("ocrStatus").textContent = "PDF wird analysiert …";
+
+      // First try the PDF text layer. This is much more accurate for digital invoices.
+      text = await extractPdfNativeText(file);
+
+      // Screenshot/scanned PDFs often contain no usable text layer. OCR rendered pages instead.
+      if (text.replace(/\s/g, "").length < 40) {
+        const pages = await pdfPagesForOcr(file);
+        const texts = [];
+        for (let i = 0; i < pages.length; i++) {
+          $("ocrStatus").textContent = "PDF wird gelesen … Seite " + (i + 1) + " von " + pages.length;
+          const result = await Tesseract.recognize(pages[i], "deu");
+          texts.push(result.data.text || "");
+        }
+        text = texts.join("\n");
+      }
     } else {
-      $("ocrStatus").textContent = "PDF ausgewählt – automatische PDF-Erkennung ist derzeit eingeschränkt. Bitte Angaben kontrollieren.";
-      return;
+      throw new Error("Nicht unterstütztes Dateiformat");
     }
 
-    const result = await Tesseract.recognize(ocrInput, "deu");
-    const text = (result.data.text || "").replace(/\u00a0/g, " ");
+    text = String(text || "").replace(/\u00a0/g, " ");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
-    const merchant = detectMerchant(lines);
-    const date = detectReceiptDate(text);
-    const amount = detectReceiptAmount(lines);
-    const invoiceNumber = detectInvoiceNumber(text);
+    let merchant = detectMerchant(lines);
+    if (/amazon/i.test(text)) merchant = "Amazon";
+
+    let date = detectReceiptDate(text);
+    const amazonDate = text.match(/bestellung\s+aufgegeben\s+([0-3]?\d)\.\s*([A-Za-zÄÖÜäöü]+)\s+(20\d{2})/i);
+    if (amazonDate) {
+      const months = {januar:1,februar:2,märz:3,maerz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12};
+      const month = months[amazonDate[2].toLowerCase()];
+      if (month) date = amazonDate[3] + "-" + String(month).padStart(2,"0") + "-" + String(amazonDate[1]).padStart(2,"0");
+    }
+
+    let amount = detectReceiptAmount(lines);
+    const explicitTotal = text.match(/(?:gesamtsumme|gesamtbetrag|endbetrag|zu zahlen)\s*:?\s*(\d{1,6}[,.]\d{2})\s*€?/i);
+    if (explicitTotal) amount = parseMoney(explicitTotal[1]);
+
+    let invoiceNumber = detectInvoiceNumber(text);
+    const orderMatch = text.match(/bestell(?:nummer|nr\.?)\s*[:#-]?\s*([0-9-]{8,})/i);
+    if (orderMatch) invoiceNumber = orderMatch[1];
 
     if (!$("merchant").value && merchant) $("merchant").value = merchant;
     if (!$("receiptDate").value && date) $("receiptDate").value = date;
@@ -530,7 +575,7 @@ async function runOCR(file) {
       merchant ? "Geschäft" : "",
       date ? "Datum" : "",
       amount ? "Betrag" : "",
-      invoiceNumber ? "Belegnummer" : ""
+      invoiceNumber ? "Beleg-/Bestellnummer" : ""
     ].filter(Boolean);
 
     $("ocrStatus").textContent = found.length
