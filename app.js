@@ -628,6 +628,7 @@ async function submitReceipt() {
     .from("receipts")
     .insert({
       submitted_by: currentUser.id,
+      reimbursement_recipient_id: currentUser.id,
       merchant: $("merchant").value.trim() || null,
       receipt_date: $("receiptDate").value || null,
       invoice_number: $("invoiceNumber").value.trim() || null,
@@ -916,17 +917,47 @@ async function editReceipt(id) {
   const invoiceNumber = window.prompt("Rechnungs-/Belegnummer:", receipt.invoice_number || "");
   if (invoiceNumber === null) return;
 
+  let reimbursementRecipientId = receipt.reimbursement_recipient_id || receipt.submitted_by;
+  let reimbursementRecipientName = "";
+
+  // Only the Kassier can submit/edit a receipt on behalf of another member.
+  // Normal members always remain the reimbursement recipient themselves.
+  if (currentProfile.role === "treasurer" && receipt.payment_method === "private_reimbursement") {
+    const profileResult = await sb.from("profiles")
+      .select("id,display_name,active")
+      .eq("active", true)
+      .order("display_name");
+    if (profileResult.error) return toast(profileResult.error.message, true);
+
+    const profiles = profileResult.data || [];
+    const currentIndex = Math.max(0, profiles.findIndex((p) => p.id === reimbursementRecipientId));
+    const menu = profiles.map((p, index) =>
+      (index + 1) + " = " + p.display_name + (p.id === reimbursementRecipientId ? " (aktuell)" : "")
+    ).join("\n");
+
+    const answer = window.prompt(
+      "Rückerstattung an welches Mitglied?\n\n" + menu + "\n\nNummer eingeben:",
+      String(currentIndex + 1)
+    );
+    if (answer === null) return;
+    const selected = profiles[Number(answer) - 1];
+    if (!selected) return toast("Bitte ein gültiges Mitglied auswählen.", true);
+    reimbursementRecipientId = selected.id;
+    reimbursementRecipientName = selected.display_name;
+  }
+
   const update = await sb.from("receipts").update({
     merchant: merchant.trim() || null,
     receipt_date: date || null,
     amount,
     purpose: purpose.trim(),
-    invoice_number: invoiceNumber.trim() || null
+    invoice_number: invoiceNumber.trim() || null,
+    reimbursement_recipient_id: reimbursementRecipientId
   }).eq("id", id);
   if (update.error) return toast("Änderung fehlgeschlagen: " + update.error.message, true);
   await sb.from("audit_log").insert({
     actor_id: currentUser.id, entity_type: "receipt", entity_id: id,
-    action: "edited", details: { merchant, date, amount, purpose, invoice_number: invoiceNumber }
+    action: "edited", details: { merchant, date, amount, purpose, invoice_number: invoiceNumber, reimbursement_recipient_id: reimbursementRecipientId, reimbursement_recipient_name: reimbursementRecipientName || null }
   });
   toast("Beleg wurde geändert.");
   await loadMyReceipts();
@@ -1276,7 +1307,7 @@ async function rejectReceipt(id) {
 async function loadPayouts() {
   const result = await sb
     .from("receipts")
-    .select("*,profiles!receipts_submitted_by_fkey(display_name,iban)")
+    .select("*,reimbursement_profile:profiles!receipts_reimbursement_recipient_id_fkey(display_name,iban)")
     .eq("status", "approved")
     .eq("payment_method", "private_reimbursement")
     .order("approved_at");
@@ -1294,25 +1325,25 @@ async function loadPayouts() {
       return (
         '<div class="list-row">' +
         "<div><strong>" +
-        escapeHtml(receipt.profiles?.display_name || "Mitglied") +
+        escapeHtml(receipt.reimbursement_profile?.display_name || "Mitglied") +
         '</strong><div class="hint">' +
         escapeHtml(receiptNumber(receipt)) +
         " · " +
         escapeHtml(receipt.purpose) +
         '</div><div class="payout-details"><div><span>IBAN</span><strong>' +
-        escapeHtml(receipt.profiles?.iban ? formatIban(receipt.profiles.iban) : "NICHT HINTERLEGT") +
+        escapeHtml(receipt.reimbursement_profile?.iban ? formatIban(receipt.profiles.iban) : "NICHT HINTERLEGT") +
         '</strong></div><div><span>Zahlungsreferenz</span><strong>' +
         escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
         '</strong></div></div></div>' +
         '<div class="list-actions"><strong class="money">' +
         euro(receipt.amount) +
         '</strong><button class="btn btn-primary qr-payment-btn" data-name="' +
-        escapeHtml(receipt.profiles?.display_name || "") +
-        '" data-iban="' + escapeHtml(receipt.profiles?.iban || "") +
+        escapeHtml(receipt.reimbursement_profile?.display_name || "") +
+        '" data-iban="' + escapeHtml(receipt.reimbursement_profile?.iban || "") +
         '" data-amount="' + escapeHtml(String(receipt.amount)) +
         '" data-reference="' + escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
         '">QR-Code anzeigen</button><button class="btn btn-secondary copy-payment-btn" data-iban="' +
-        escapeHtml(receipt.profiles?.iban || "") +
+        escapeHtml(receipt.reimbursement_profile?.iban || "") +
         '" data-reference="' +
         escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
         '">Überweisungsdaten kopieren</button><button class="btn btn-primary paid-btn" data-id="' +
