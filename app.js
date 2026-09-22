@@ -118,12 +118,14 @@ function showLoggedOut() {
   $("authView").classList.remove("hidden");
   $("appView").classList.add("hidden");
   $("logoutBtn").classList.add("hidden");
+  if ($("refreshAppBtn")) $("refreshAppBtn").classList.add("hidden");
 }
 
 function showLoggedIn() {
   $("authView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   $("logoutBtn").classList.remove("hidden");
+  if ($("refreshAppBtn")) $("refreshAppBtn").classList.remove("hidden");
 }
 
 async function loadReferences() {
@@ -988,8 +990,11 @@ async function deleteReceipt(id) {
     action: "deleted", details: {}
   });
 
-  const del = await sb.from("receipts").delete().eq("id", id);
+  const del = await sb.from("receipts").delete().eq("id", id).select("id");
   if (del.error) return toast("Löschen fehlgeschlagen: " + del.error.message, true);
+  if (!(del.data || []).length) {
+    return toast("Der Beleg konnte nicht gelöscht werden. Bitte Seite aktualisieren und erneut versuchen.", true);
+  }
 
   if (paths.length) {
     const storageDelete = await sb.storage.from("receipt-files").remove(paths);
@@ -2414,6 +2419,22 @@ $("toggleRegisterBtn").addEventListener("click", () => {
 $("loginBtn").addEventListener("click", handleLogin);
 $("registerBtn").addEventListener("click", handleRegister);
 $("logoutBtn").addEventListener("click", handleLogout);
+$("refreshAppBtn").addEventListener("click", async () => {
+  const active = document.querySelector("#nav button.active")?.dataset.view || "submit";
+  const button = $("refreshAppBtn");
+  button.disabled = true;
+  button.textContent = "Aktualisiere …";
+  try {
+    await loadReferences();
+    await showView(active);
+    toast("Daten wurden aktualisiert.");
+  } catch (error) {
+    toast("Aktualisieren fehlgeschlagen: " + error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Aktualisieren";
+  }
+});
 $("editOwnIbanBtn").addEventListener("click", editOwnIban);
 $("submitReceiptBtn").addEventListener("click", submitReceipt);
 $("saveIncomeBtn").addEventListener("click", saveIncome);
