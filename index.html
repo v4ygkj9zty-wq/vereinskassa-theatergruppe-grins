@@ -59,8 +59,14 @@
 
     <section id="view-submit" class="card app-view">
       <h2>Beleg einreichen</h2>
-      <label for="receiptFile">Foto oder PDF</label>
-      <input id="receiptFile" type="file" accept="image/*,application/pdf" capture="environment">
+      <label>Beleg auswählen</label>
+      <div class="receipt-source-buttons">
+        <button id="takeReceiptPhotoBtn" type="button" class="btn btn-primary">Foto aufnehmen</button>
+        <button id="chooseReceiptFileBtn" type="button" class="btn btn-secondary">Foto / PDF auswählen</button>
+      </div>
+      <input id="receiptCameraFile" class="hidden" type="file" accept="image/*" capture="environment">
+      <input id="receiptFile" class="hidden" type="file" accept="image/*,application/pdf">
+      <div id="selectedReceiptFile" class="hint"></div>
       <div id="ocrStatus" class="hint"></div>
 
       <div class="two-col">
