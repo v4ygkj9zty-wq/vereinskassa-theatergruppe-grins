@@ -457,6 +457,46 @@ async function prepareImageForOcr(file) {
   }
 }
 
+async function pdfPagesForOcr(file) {
+  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const pages = [];
+  const pageCount = Math.min(pdf.numPages, 3);
+
+  for (let pageNo = 1; pageNo <= pageCount; pageNo++) {
+    const page = await pdf.getPage(pageNo);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const targetWidth = Math.min(2200, Math.max(1500, baseViewport.width * 2));
+    const scale = targetWidth / baseViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // Improve contrast for scanned PDF receipts before OCR.
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
+      data[i] = data[i + 1] = data[i + 2] = contrasted;
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (blob) pages.push(blob);
+  }
+  return pages;
+}
+
 async function runOCR(file) {
   $("ocrStatus").textContent = "Beleg wird intelligent analysiert …";
 
@@ -2309,10 +2349,10 @@ async function handleSelectedReceiptFile(file, sourceInput) {
 
   $("selectedReceiptFile").textContent = "Ausgewählt: " + file.name;
 
-  if (file.type.startsWith("image/")) {
+  if (file.type.startsWith("image/") || String(file.type).includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) {
     await runOCR(file);
   } else {
-    $("ocrStatus").textContent = "PDF gewählt – Daten bitte kontrollieren und ergänzen.";
+    $("ocrStatus").textContent = "Dieses Dateiformat kann nicht automatisch gelesen werden.";
   }
 }
 
