@@ -162,19 +162,26 @@ async function loadReferences() {
 }
 
 function buildNavigation() {
-  const items = [
-    ["submit", "Beleg einreichen"],
-    ["my", "Meine Belege"]
-  ];
+  const items = [];
+
+  if (financeRoles.includes(currentProfile.role)) {
+    items.push(["dashboard", "Übersicht"]);
+  }
+
+  items.push(["submit", "Beleg"]);
+  items.push(["my", "Meine Belege"]);
 
   if (financeRoles.includes(currentProfile.role)) {
     items.push(["income", "Geldeingang"]);
-    items.push(["dashboard", "Dashboard"]);
-    items.push(["audit", "Kassenprüfung / Export"]);
   }
   if (editRoles.includes(currentProfile.role)) {
     items.push(["payouts", "Auszahlungen"]);
-    items.push(["bank", "Bank & Import"]);
+    items.push(["bank", "Bank"]);
+  }
+  if (financeRoles.includes(currentProfile.role)) {
+    items.push(["audit", "Kassenprüfung"]);
+  }
+  if (editRoles.includes(currentProfile.role)) {
     items.push(["members", "Mitglieder"]);
   }
 
