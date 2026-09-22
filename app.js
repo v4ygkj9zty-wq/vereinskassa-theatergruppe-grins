@@ -355,51 +355,147 @@ async function handleLogout() {
   showLoggedOut();
 }
 
+function scoreReceiptAmountLine(line, value) {
+  const lower = line.toLowerCase();
+  let score = 0;
+  if (/zu zahlen|zahlbetrag|endbetrag|rechnungsbetrag|gesamtbetrag|gesamt|summe|total|betrag|kartenzahlung|barzahlung/.test(lower)) score += 12;
+  if (/eur|€/.test(lower)) score += 3;
+  if (/brutto/.test(lower)) score += 2;
+  if (/mwst|ust|steuer|netto|gegeben|rückgeld|ruckgeld|wechselgeld|rabatt|ersparnis/.test(lower)) score -= 8;
+  if (value > 0) score += Math.min(3, Math.log10(value + 1));
+  return score;
+}
+
+function detectReceiptAmount(lines) {
+  const candidates = [];
+  lines.forEach((line, index) => {
+    const matches = line.match(/(?:€\s*)?\d{1,6}(?:[.\s]\d{3})*[,.]\d{2}(?:\s*€|\s*EUR)?/gi) || [];
+    matches.forEach((raw) => {
+      const value = parseMoney(raw.replace(/\s/g, ""));
+      if (!Number.isFinite(value) || value <= 0 || value >= 100000) return;
+      candidates.push({ value, score: scoreReceiptAmountLine(line, value), index, line });
+    });
+  });
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score || b.index - a.index || b.value - a.value);
+  const best = candidates[0];
+  if (best.score >= 4) return best.value;
+
+  // If OCR did not recognise labels, totals are usually among the last monetary
+  // values on a receipt. Prefer the largest value in the lower half.
+  const lowerHalf = candidates.filter((x) => x.index >= Math.floor(lines.length * 0.45));
+  const pool = lowerHalf.length ? lowerHalf : candidates;
+  return pool.sort((a, b) => b.value - a.value)[0].value;
+}
+
+function detectReceiptDate(text) {
+  const patterns = [
+    /\b([0-3]?\d)[./-]([01]?\d)[./-](20\d{2})\b/,
+    /\b(20\d{2})[./-]([01]?\d)[./-]([0-3]?\d)\b/,
+    /\b([0-3]?\d)[./-]([01]?\d)[./-](\d{2})\b/
+  ];
+  for (let i = 0; i < patterns.length; i++) {
+    const match = text.match(patterns[i]);
+    if (!match) continue;
+    let year, month, day;
+    if (i === 1) {
+      year = match[1]; month = match[2]; day = match[3];
+    } else {
+      day = match[1]; month = match[2]; year = match[3];
+      if (year.length === 2) year = "20" + year;
+    }
+    const iso = year + "-" + month.padStart(2, "0") + "-" + day.padStart(2, "0");
+    const date = new Date(iso + "T00:00:00");
+    if (!Number.isNaN(date.getTime()) && date <= new Date()) return iso;
+  }
+  return null;
+}
+
+function detectMerchant(lines) {
+  const ignore = /^(rechnung|kassenbon|beleg|quittung|rechnung nr|bon nr|datum|ust|uid|tel|telefon|www\.|http|eur|summe|gesamt)/i;
+  const candidates = lines.slice(0, Math.min(12, lines.length))
+    .map((line, index) => ({ line: line.replace(/\s+/g, " ").trim(), index }))
+    .filter((x) => x.line.length >= 3 && x.line.length <= 65 && !ignore.test(x.line))
+    .map((x) => {
+      let score = 10 - x.index * 0.45;
+      if (/[A-Za-zÄÖÜäöüß]{3}/.test(x.line)) score += 4;
+      if (/gmbh|kg|og|ag|hotel|gasthof|restaurant|markt|apotheke|hofer|lidl|mpreis|spar|billa|bauhaus/i.test(x.line)) score += 5;
+      if (/@|iban|uid|fn\s?\d|straße|strasse|\d{4}\s+[A-Za-z]/i.test(x.line)) score -= 3;
+      return { ...x, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.line || "";
+}
+
+function detectInvoiceNumber(text) {
+  const patterns = [
+    /(?:rechnung|invoice)\s*(?:nr\.?|nummer|no\.?)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})/i,
+    /(?:beleg|bon)\s*(?:nr\.?|nummer|no\.?)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+async function prepareImageForOcr(file) {
+  if (!file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxWidth = 2200;
+    const scale = bitmap.width > maxWidth ? maxWidth / bitmap.width : 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.filter = "grayscale(1) contrast(1.35)";
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.92));
+  } catch {
+    return file;
+  }
+}
+
 async function runOCR(file) {
-  $("ocrStatus").textContent = "Beleg wird automatisch gelesen …";
+  $("ocrStatus").textContent = "Beleg wird intelligent analysiert …";
 
   try {
     const Tesseract = await import("https://cdn.jsdelivr.net/npm/tesseract.js@5/+esm");
-    const result = await Tesseract.recognize(file, "deu");
-    const text = result.data.text || "";
+    let ocrInput = file;
+
+    // PDF files are kept uploadable. Browser OCR is strongest on photos/images.
+    if (file.type.startsWith("image/")) {
+      ocrInput = await prepareImageForOcr(file);
+    } else {
+      $("ocrStatus").textContent = "PDF ausgewählt – automatische PDF-Erkennung ist derzeit eingeschränkt. Bitte Angaben kontrollieren.";
+      return;
+    }
+
+    const result = await Tesseract.recognize(ocrInput, "deu");
+    const text = (result.data.text || "").replace(/\u00a0/g, " ");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
-    if (!$("merchant").value && lines.length) {
-      $("merchant").value = lines.find((line) => line.length > 2 && line.length < 70) || lines[0];
-    }
+    const merchant = detectMerchant(lines);
+    const date = detectReceiptDate(text);
+    const amount = detectReceiptAmount(lines);
+    const invoiceNumber = detectInvoiceNumber(text);
 
-    const dateMatch = text.match(/\b([0-9]{1,2})[./-]([0-9]{1,2})[./-](20[0-9]{2})\b/);
-    if (dateMatch && !$("receiptDate").value) {
-      $("receiptDate").value =
-        dateMatch[3] +
-        "-" +
-        dateMatch[2].padStart(2, "0") +
-        "-" +
-        dateMatch[1].padStart(2, "0");
-    }
+    if (!$("merchant").value && merchant) $("merchant").value = merchant;
+    if (!$("receiptDate").value && date) $("receiptDate").value = date;
+    if (!$("amount").value && amount) $("amount").value = Number(amount).toFixed(2);
+    if (!$("invoiceNumber").value && invoiceNumber) $("invoiceNumber").value = invoiceNumber;
 
-    const totalLines = lines.filter((line) => /gesamt|summe|total|betrag|zu zahlen/i.test(line));
-    const sourceLines = totalLines.length ? totalLines : lines;
-    const values = [];
+    const found = [
+      merchant ? "Geschäft" : "",
+      date ? "Datum" : "",
+      amount ? "Betrag" : "",
+      invoiceNumber ? "Belegnummer" : ""
+    ].filter(Boolean);
 
-    sourceLines.forEach((line) => {
-      const matches = line.match(/[0-9]{1,5}[.,][0-9]{2}/g) || [];
-      matches.forEach((match) => {
-        const number = parseMoney(match);
-        if (number > 0 && number < 100000) values.push(number);
-      });
-    });
-
-    if (values.length && !$("amount").value) {
-      $("amount").value = Math.max(...values).toFixed(2);
-    }
-
-    const invoiceMatch = text.match(/(?:rechnung|beleg|bon)[-\s]*(?:nr\.?|nummer)?[:\s#-]*([A-Z0-9/-]{3,})/i);
-    if (invoiceMatch && !$("invoiceNumber").value) {
-      $("invoiceNumber").value = invoiceMatch[1];
-    }
-
-    $("ocrStatus").textContent = "Automatische Erkennung abgeschlossen – bitte Werte kontrollieren.";
+    $("ocrStatus").textContent = found.length
+      ? "Erkannt: " + found.join(", ") + ". Bitte kurz kontrollieren."
+      : "Der Beleg konnte nicht sicher erkannt werden. Bitte Angaben manuell ergänzen.";
   } catch (error) {
     console.error(error);
     $("ocrStatus").textContent = "Automatische Erkennung nicht möglich – bitte Daten manuell eingeben.";
