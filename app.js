@@ -1331,7 +1331,7 @@ async function loadPayouts() {
         " · " +
         escapeHtml(receipt.purpose) +
         '</div><div class="payout-details"><div><span>IBAN</span><strong>' +
-        escapeHtml(receipt.reimbursement_profile?.iban ? formatIban(receipt.profiles.iban) : "NICHT HINTERLEGT") +
+        escapeHtml(receipt.reimbursement_profile?.iban ? formatIban(receipt.reimbursement_profile.iban) : "NICHT HINTERLEGT") +
         '</strong></div><div><span>Zahlungsreferenz</span><strong>' +
         escapeHtml(receiptNumber(receipt) + " " + receipt.purpose) +
         '</strong></div></div></div>' +
