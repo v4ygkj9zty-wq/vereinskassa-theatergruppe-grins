@@ -47,22 +47,23 @@
 
   <div id="appView" class="hidden">
     <section class="card compact user-card">
-      <div>
+      <div class="user-copy">
+        <span class="eyebrow">Angemeldet als</span>
         <strong id="helloText"></strong>
         <div id="roleText" class="hint"></div>
         <div id="ibanStatus" class="hint"></div>
-        <button id="editOwnIbanBtn" class="btn btn-secondary">Meine IBAN</button>
       </div>
+      <button id="editOwnIbanBtn" class="btn btn-secondary">Meine IBAN</button>
     </section>
 
     <nav id="nav" class="nav"></nav>
 
     <section id="view-submit" class="card app-view">
-      <h2>Beleg einreichen</h2>
+      <div class="section-heading"><div><span class="eyebrow">Schnellerfassung</span><h2>Beleg einreichen</h2><p class="section-copy">Foto oder PDF auswählen – die wichtigsten Rechnungsdaten werden automatisch erkannt.</p></div></div>
       <label>Beleg auswählen</label>
       <div class="receipt-source-buttons">
-        <button id="takeReceiptPhotoBtn" type="button" class="btn btn-primary">Foto aufnehmen</button>
-        <button id="chooseReceiptFileBtn" type="button" class="btn btn-secondary">Foto / PDF auswählen</button>
+        <button id="takeReceiptPhotoBtn" type="button" class="source-card"><span class="source-icon">📷</span><span><strong>Foto aufnehmen</strong><small>Beleg direkt fotografieren</small></span></button>
+        <button id="chooseReceiptFileBtn" type="button" class="source-card"><span class="source-icon">📄</span><span><strong>Datei auswählen</strong><small>Foto oder PDF verwenden</small></span></button>
       </div>
       <input id="receiptCameraFile" class="hidden" type="file" accept="image/*" capture="environment">
       <input id="receiptFile" class="hidden" type="file" accept="image/*,application/pdf">
@@ -129,6 +130,7 @@
     </section>
 
     <section id="view-dashboard" class="app-view hidden">
+      <div class="page-heading"><div><span class="eyebrow">Finanzen</span><h2>Dashboard</h2><p class="section-copy">Konten, Einnahmen, Ausgaben und offene Vorgänge auf einen Blick.</p></div></div>
       <div class="filters card compact">
         <div>
           <label for="dashboardYear">Jahr</label>
@@ -174,6 +176,7 @@
     </section>
 
     <section id="view-bank" class="app-view hidden">
+      <div class="page-heading"><div><span class="eyebrow">Abgleich</span><h2>Bank & Zuordnung</h2><p class="section-copy">Kontoauszüge importieren und offene Buchungen Schritt für Schritt erledigen.</p></div></div>
       <section class="card">
         <h2>Bankkonten</h2>
         <div id="bankAccounts"></div>
@@ -203,12 +206,12 @@
       </section>
 
       <section class="card">
-        <h2>Ausgaenge - Beleg fehlt / Zuordnung</h2>
+        <h2>Ausgänge – Beleg fehlt / Zuordnung</h2>
         <div id="missingReceipts"></div>
       </section>
       <section class="card">
-        <h2>Eingaenge - Zuordnung</h2>
-        <p class="hint">Bankeingaenge mit einem Geldeingang verknuepfen oder ohne separaten Beleg abschliessen.</p>
+        <h2>Eingänge – Zuordnung</h2>
+        <p class="hint">Bankeingänge mit einem Geldeingang verknüpfen oder ohne separaten Beleg abschließen.</p>
         <div id="unmatchedIncomeTransactions"></div>
       </section>
     </section>
@@ -223,7 +226,7 @@
           <div class="button-row">
             <button id="auditPrintBtn" class="btn btn-secondary">Drucken / PDF</button>
             <button id="auditCsvBtn" class="btn btn-primary">CSV Export</button>
-            <button id="receiptSheetBtn" class="btn btn-primary">Belegblaetter / PDF</button>
+            <button id="receiptSheetBtn" class="btn btn-primary">Belegblätter / PDF</button>
           </div>
         </div>
         <div class="filters">
