@@ -407,7 +407,7 @@ async function runOCR(file) {
 }
 
 async function submitReceipt() {
-  const file = $("receiptFile").files[0];
+  const file = $("receiptFile").files[0] || $("receiptCameraFile").files[0];
   const amount = Number($("amount").value);
   const purpose = $("purpose").value.trim();
 
@@ -491,6 +491,8 @@ async function submitReceipt() {
     $(id).value = "";
   });
   $("receiptFile").value = "";
+  $("receiptCameraFile").value = "";
+  $("selectedReceiptFile").textContent = "";
   $("ocrStatus").textContent = "";
   $("submitReceiptBtn").disabled = false;
 
@@ -2200,14 +2202,33 @@ $("incomeChannel").addEventListener("change", () => {
   $("incomeAccountWrap").classList.toggle("hidden", $("incomeChannel").value !== "bank");
 });
 
-$("receiptFile").addEventListener("change", async (event) => {
-  const file = event.target.files[0];
+async function handleSelectedReceiptFile(file, sourceInput) {
   if (!file) return;
+
+  if (sourceInput === "camera") {
+    $("receiptFile").value = "";
+  } else {
+    $("receiptCameraFile").value = "";
+  }
+
+  $("selectedReceiptFile").textContent = "Ausgewählt: " + file.name;
+
   if (file.type.startsWith("image/")) {
     await runOCR(file);
   } else {
     $("ocrStatus").textContent = "PDF gewählt – Daten bitte kontrollieren und ergänzen.";
   }
+}
+
+$("takeReceiptPhotoBtn").addEventListener("click", () => $("receiptCameraFile").click());
+$("chooseReceiptFileBtn").addEventListener("click", () => $("receiptFile").click());
+
+$("receiptCameraFile").addEventListener("change", async (event) => {
+  await handleSelectedReceiptFile(event.target.files[0], "camera");
+});
+
+$("receiptFile").addEventListener("change", async (event) => {
+  await handleSelectedReceiptFile(event.target.files[0], "file");
 });
 
 $("dashboardYear").addEventListener("change", loadDashboard);
