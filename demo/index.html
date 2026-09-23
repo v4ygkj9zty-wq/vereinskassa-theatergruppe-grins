@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>VereinsKassa DEMO – Theatergruppe Grins</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=11">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div>
+      <h1>Theatergruppe Grins</h1>
+      <div class="subtitle">VereinsKassa · DEMO</div>
+    </div>
+    <div class="topbar-actions"><div class="topbar-actions"><button id="demoResetBtn" class="btn btn-light">Demo zurücksetzen</button></div></div>
+  </div>
+</header>
+
+<div class="demo-banner">DEMO-MODUS · Nur Beispieldaten · Keine echten Vereinsdaten</div>
+<main class="wrap">
+  <section id="authView" class="card auth-card hidden">
+    <h2>Anmelden</h2>
+    <div class="two-col">
+      <div>
+        <label for="email">E-Mail-Adresse</label>
+        <input id="email" type="email" autocomplete="email">
+        <label for="password">Passwort</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <div class="button-row">
+          <button id="loginBtn" class="btn btn-primary">Anmelden</button>
+          <button id="toggleRegisterBtn" class="btn btn-secondary">Registrieren</button>
+        </div>
+        <div id="authMessage" class="hint"></div>
+      </div>
+      <div id="registerBox" class="hidden">
+        <label for="displayName">Name</label>
+        <input id="displayName" autocomplete="name">
+        <button id="registerBtn" class="btn btn-primary">Konto anlegen</button>
+        <p class="hint">Falls eine Bestätigungs-E-Mail kommt, bitte bestätigen und danach wieder hier anmelden.</p>
+      </div>
+    </div>
+  </section>
+
+  <div id="appView">
+    <section class="card compact user-card">
+      <div class="user-copy">
+        <span class="eyebrow">Angemeldet als</span>
+        <strong id="helloText"></strong>
+        <div id="roleText" class="hint"></div>
+        <div id="ibanStatus" class="hint"></div>
+      </div>
+      <button id="editOwnIbanBtn" class="btn btn-secondary">Meine IBAN</button>
+    </section>
+
+    <nav id="nav" class="nav"></nav>
+
+    <section id="view-submit" class="card app-view">
+      <div class="section-heading"><div><span class="eyebrow">Schnellerfassung</span><h2>Beleg einreichen</h2><p class="section-copy">Foto oder PDF auswählen – die wichtigsten Rechnungsdaten werden automatisch erkannt.</p></div></div>
+      <label>Beleg auswählen</label>
+      <div class="receipt-source-buttons">
+        <button id="takeReceiptPhotoBtn" type="button" class="source-card"><span class="source-icon">📷</span><span><strong>Foto aufnehmen</strong><small>Beleg direkt fotografieren</small></span></button>
+        <button id="chooseReceiptFileBtn" type="button" class="source-card"><span class="source-icon">📄</span><span><strong>Datei auswählen</strong><small>Foto oder PDF verwenden</small></span></button>
+      </div>
+      <input id="receiptCameraFile" class="hidden" type="file" accept="image/*" capture="environment">
+      <input id="receiptFile" class="hidden" type="file" accept="image/*,application/pdf">
+      <div id="selectedReceiptFile" class="hint"></div>
+      <div id="ocrStatus" class="hint"></div>
+
+      <div class="two-col">
+        <div>
+          <label for="merchant">Geschäft / Lieferant</label>
+          <input id="merchant">
+        </div>
+        <div>
+          <label for="receiptDate">Datum</label>
+          <input id="receiptDate" type="date">
+        </div>
+        <div>
+          <label for="amount">Betrag (€)</label>
+          <input id="amount" type="number" inputmode="decimal" min="0" step="0.01">
+        </div>
+        <div>
+          <label for="invoiceNumber">Rechnungs-/Belegnummer</label>
+          <input id="invoiceNumber">
+        </div>
+      </div>
+
+      <label for="paymentMethod">Bezahlt mit</label>
+      <select id="paymentMethod">
+        <option value="private_reimbursement">Privat bezahlt – Rückerstattung an mich</option>
+        <option value="club_card">Vereinsbankomatkarte</option>
+        <option value="cash">Vereinskassa / Bar</option>
+      </select>
+
+      <label for="category">Kategorie</label>
+      <select id="category"></select>
+
+      <label for="purpose">Verwendungszweck</label>
+      <textarea id="purpose" placeholder="z. B. Getränke für Theateraufführung"></textarea>
+
+      <button id="submitReceiptBtn" class="btn btn-primary">Beleg einreichen</button>
+    </section>
+
+    <section id="view-income" class="card app-view hidden">
+      <h2>Geldeingang erfassen</h2>
+      <div class="two-col">
+        <div><label for="incomeDate">Datum</label><input id="incomeDate" type="date"></div>
+        <div><label for="incomeAmount">Betrag (€)</label><input id="incomeAmount" type="number" inputmode="decimal" min="0" step="0.01"></div>
+        <div><label for="incomeSource">Zahler / Quelle</label><input id="incomeSource" placeholder="z. B. Mitglied, Gemeinde, Sponsor"></div>
+        <div><label for="incomeCategory">Kategorie</label><select id="incomeCategory"></select></div>
+        <div><label for="incomeChannel">Zahlungsweg</label><select id="incomeChannel"><option value="bank">Bank</option><option value="cash">Bar / Vereinskassa</option></select></div>
+        <div id="incomeAccountWrap"><label for="incomeAccount">Bankkonto</label><select id="incomeAccount"></select></div>
+      </div>
+      <label for="incomePurpose">Verwendungszweck / Beschreibung</label>
+      <textarea id="incomePurpose" placeholder="z. B. Mitgliedsbeitrag 2026"></textarea>
+      <label for="incomeFile">Beleg / Bestätigung (optional)</label>
+      <input id="incomeFile" type="file" accept="image/*,application/pdf">
+      <button id="saveIncomeBtn" class="btn btn-primary">Geldeingang speichern</button>
+      <h3 style="margin-top:22px">Erfasste Geldeingänge</h3>
+      <div id="incomeList"></div>
+    </section>
+
+    <section id="view-my" class="card app-view hidden">
+      <h2>Meine Belege</h2>
+      <div id="myReceipts"></div>
+    </section>
+
+    <section id="view-dashboard" class="app-view hidden">
+      <div class="page-heading"><div><span class="eyebrow">Finanzen</span><h2>Dashboard</h2><p class="section-copy">Konten, Einnahmen, Ausgaben und offene Vorgänge auf einen Blick.</p></div></div>
+      <div class="filters card compact">
+        <div>
+          <label for="dashboardYear">Jahr</label>
+          <select id="dashboardYear"></select>
+        </div>
+        <div>
+          <label for="dashboardAccount">Konto</label>
+          <select id="dashboardAccount"></select>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat"><span>Kontostand</span><strong id="statBalance">€ 0,00</strong></div>
+        <div class="stat"><span>Einnahmen</span><strong id="statIncome">€ 0,00</strong></div>
+        <div class="stat"><span>Ausgaben</span><strong id="statExpense">€ 0,00</strong></div>
+        <div class="stat"><span>Offen auszuzahlen</span><strong id="statPayout">€ 0,00</strong></div>
+      </div>
+
+      <section class="card">
+        <h2>Monatsübersicht</h2>
+        <div id="monthChart"></div>
+      </section>
+
+      <section class="card">
+        <div>
+          <h2>Buchungsdetails</h2>
+          <p class="hint">Alle Bankbewegungen der ausgewählten Ansicht, chronologisch aufgelistet.</p>
+        </div>
+        <div id="transactionSummary" class="audit-summary"></div>
+        <div id="transactionDetails" class="table-wrap"></div>
+      </section>
+
+      <section class="card">
+        <h2>Belege zur Freigabe</h2>
+        <div id="approvalList"></div>
+      </section>
+    </section>
+
+    <section id="view-payouts" class="card app-view hidden">
+      <h2>Zur Auszahlung</h2>
+      <p class="hint">Überweisung selbst im Onlinebanking durchführen und danach als ausbezahlt markieren.</p>
+      <div id="payoutList"></div>
+    </section>
+
+    <section id="view-bank" class="app-view hidden">
+      <div class="page-heading"><div><span class="eyebrow">Abgleich</span><h2>Bank & Zuordnung</h2><p class="section-copy">Kontoauszüge importieren und offene Buchungen Schritt für Schritt erledigen.</p></div></div>
+      <section class="card">
+        <h2>Bankkonten</h2>
+        <div id="bankAccounts"></div>
+      </section>
+
+      <section class="card">
+        <h2>Bankauszug importieren</h2>
+        <p class="hint">CSV-Import mit Spaltenzuordnung und Dublettenprüfung.</p>
+
+        <label for="importAccount">Konto</label>
+        <select id="importAccount"></select>
+
+        <label for="bankFile">CSV-Datei</label>
+        <input id="bankFile" type="file" accept=".csv,text/csv">
+
+        <div id="mappingBox" class="hidden">
+          <div class="two-col">
+            <div><label for="mapDate">Datumsspalte</label><select id="mapDate"></select></div>
+            <div><label for="mapAmount">Betragsspalte</label><select id="mapAmount"></select></div>
+            <div><label for="mapDescription">Buchungstext</label><select id="mapDescription"></select></div>
+            <div><label for="mapCounterparty">Gegenpartei</label><select id="mapCounterparty"></select></div>
+            <div><label for="mapReference">Bank-Belegnummer / Referenz</label><select id="mapReference"></select></div>
+          </div>
+          <div id="bankPreview" class="table-wrap"></div>
+          <button id="importBankBtn" class="btn btn-primary">Importieren</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Ausgänge – Beleg fehlt / Zuordnung</h2>
+        <div id="missingReceipts"></div>
+      </section>
+      <section class="card">
+        <h2>Eingänge – Zuordnung</h2>
+        <p class="hint">Bankeingänge mit einem Geldeingang verknüpfen oder ohne separaten Beleg abschließen.</p>
+        <div id="unmatchedIncomeTransactions"></div>
+      </section>
+    </section>
+
+    <section id="view-audit" class="app-view hidden">
+      <section class="card">
+        <div class="audit-header">
+          <div>
+            <h2>Kassenprüfung / Export</h2>
+            <p class="hint">Vereinsbeleg und Bankbeleg nebeneinander – für Kontrolle, Ausdruck oder PDF.</p>
+          </div>
+          <div class="button-row">
+            <button id="auditPrintBtn" class="btn btn-secondary">Drucken / PDF</button>
+            <button id="auditCsvBtn" class="btn btn-primary">CSV Export</button>
+            <button id="receiptSheetBtn" class="btn btn-primary">Belegblätter / PDF</button>
+          </div>
+        </div>
+        <div class="filters">
+          <div>
+            <label for="auditYear">Jahr</label>
+            <select id="auditYear"></select>
+          </div>
+          <div>
+            <label for="auditAccount">Konto</label>
+            <select id="auditAccount"></select>
+          </div>
+        </div>
+        <div id="auditSummary" class="audit-summary"></div>
+        <div id="auditTable" class="table-wrap"></div>
+      </section>
+    </section>
+
+    <section id="view-members" class="card app-view hidden">
+      <h2>Mitglieder & Rollen</h2>
+      <div id="membersList"></div>
+    </section>
+  </div>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="demo.js"></script>
+</body>
+</html>
