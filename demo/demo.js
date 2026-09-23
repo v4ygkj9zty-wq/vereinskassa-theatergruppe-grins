@@ -1,3 +1,18 @@
+const demoCategories=["Bewirtung / Verpflegung","Requisiten","Bühnenbau / Material","Werbung","Gebühren / Bank","Sonstiges"];
+const demoAccounts=["Alle Konten","Girokonto","Sparbuch"];
+function fillDemoSelect(id,values){const el=document.getElementById(id);if(el)el.innerHTML=values.map((x,i)=>'<option value="'+i+'">'+x+'</option>').join("");}
+["category","incomeCategory"].forEach(id=>fillDemoSelect(id,demoCategories));
+["dashboardAccount","auditAccount"].forEach(id=>fillDemoSelect(id,demoAccounts));
+["incomeAccount","importAccount"].forEach(id=>fillDemoSelect(id,["Girokonto","Sparbuch"]));
+fillDemoSelect("dashboardYear",["2026","2025"]);
+fillDemoSelect("auditYear",["2026","2025"]);
+const demoFileInput=document.getElementById("receiptFile");
+const demoCameraInput=document.getElementById("receiptCameraFile");
+if(document.getElementById("takeReceiptPhotoBtn")) document.getElementById("takeReceiptPhotoBtn").onclick=()=>demoCameraInput.click();
+if(document.getElementById("chooseReceiptFileBtn")) document.getElementById("chooseReceiptFileBtn").onclick=()=>demoFileInput.click();
+function demoPicked(file){if(!file)return;document.getElementById("selectedReceiptFile").textContent="Ausgewählt: "+file.name;document.getElementById("ocrStatus").textContent="Demo-Erkennung abgeschlossen – Beispieldaten wurden eingetragen.";document.getElementById("merchant").value="Demo Händler";document.getElementById("receiptDate").value="2026-09-23";document.getElementById("amount").value="42.50";document.getElementById("invoiceNumber").value="DEMO-2026-1001";}
+if(demoFileInput)demoFileInput.onchange=e=>demoPicked(e.target.files[0]);
+if(demoCameraInput)demoCameraInput.onchange=e=>demoPicked(e.target.files[0]);
 const $=id=>document.getElementById(id);
 const euro=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR"}).format(v);
 const base={
@@ -56,9 +71,12 @@ function income(){$("incomeList").innerHTML='<div class="list-row"><div><strong>
 $("helloText").textContent="Demo Kassier";$("roleText").textContent="Kassier · Demo-Modus";$("ibanStatus").textContent="IBAN: AT00 0000 0000 0000 0000";
 $("editOwnIbanBtn").onclick=()=>alert("Demo: Hier kann die IBAN bearbeitet werden.");
 $("demoResetBtn").onclick=()=>{if(confirm("Demo wirklich auf Ausgangszustand zurücksetzen?")){data=structuredClone(base);save();show("dashboard")}};
-$("takeReceiptPhotoBtn").onclick=()=>alert("Demo: Hier würde die Kamera geöffnet.");
-$("chooseReceiptFileBtn").onclick=()=>alert("Demo: Hier würde Foto/PDF ausgewählt und automatisch erkannt.");
-$("submitReceiptBtn").onclick=()=>alert("Demo: Der Beleg würde jetzt eingereicht.");
-$("saveIncomeBtn").onclick=()=>alert("Demo: Der Geldeingang würde gespeichert.");
+
+$("submitReceiptBtn").onclick=()=>{const n="#2026-"+String(data.receipts.length+1).padStart(4,"0");data.receipts.push({id:Date.now(),no:n,date:"23.09.2026",merchant:$("merchant").value||"Demo Händler",purpose:$("purpose").value||"Demo-Beleg",amount:Number($("amount").value)||42.5,payment:$("paymentMethod").selectedOptions[0].textContent,status:"wartet auf Freigabe"});save();toastDemo("Demo-Beleg wurde eingereicht.");show("my");};
+$("saveIncomeBtn").onclick=()=>toastDemo("Demo-Geldeingang wurde gespeichert.");
 ["auditPrintBtn","auditCsvBtn","receiptSheetBtn"].forEach(id=>$(id).onclick=()=>alert("Demo: Export-Funktion wird hier vorgeführt."));
 nav();show("dashboard");
+
+function toastDemo(msg){const el=document.getElementById("toast");el.textContent=msg;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2500);}
+if(document.getElementById("incomeChannel"))document.getElementById("incomeChannel").onchange=e=>document.getElementById("incomeAccountWrap").classList.toggle("hidden",e.target.value==="cash");
+["auditPrintBtn","auditCsvBtn","receiptSheetBtn"].forEach(id=>{const el=document.getElementById(id);if(el)el.onclick=()=>toastDemo("Demo: Export wurde simuliert.");});
