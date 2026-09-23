@@ -2195,110 +2195,135 @@ function exportAuditCsv() {
   URL.revokeObjectURL(url);
 }
 
+async function receiptFileToPrintableImage(file, signedUrl) {
+  const isPdf = String(file?.mime_type || "").includes("pdf") ||
+    String(file?.file_name || "").toLowerCase().endsWith(".pdf");
+  if (!isPdf) return { url: signedUrl, kind: "image" };
+
+  // Render page 1 of PDF to a high-resolution image so PDFs appear in the A4 receipt sheet.
+  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+  const response = await fetch(signedUrl);
+  if (!response.ok) throw new Error("PDF konnte nicht geladen werden");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const page = await pdf.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(3.2, Math.max(2, 2100 / base.width));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return { url: canvas.toDataURL("image/jpeg", 0.94), kind: "pdf" };
+}
+
+function receiptPrintScale(img) {
+  const w = img.naturalWidth || 1;
+  const h = img.naturalHeight || 1;
+  const aspect = h / w;
+
+  // Aim for comparable printed character size. Narrow till receipts use the full
+  // column width; A4/full-page documents are slightly reduced. Height is allowed
+  // to grow for long receipts instead of shrinking their text to fit a fixed box.
+  if (aspect >= 3.4) return { width: 100, maxHeight: "none", long: true };
+  if (aspect >= 2.3) return { width: 100, maxHeight: "none", long: true };
+  if (aspect >= 1.55) return { width: 94, maxHeight: "104mm", long: false };
+  if (aspect >= 1.15) return { width: 84, maxHeight: "100mm", long: false };
+  return { width: 76, maxHeight: "92mm", long: false };
+}
+
 async function exportReceiptSheets() {
   const rows = auditRowsCache.filter((row) => row.receipt.receipt_files?.[0]);
   if (!rows.length) return toast("Für diese Auswahl sind keine hochgeladenen Belege vorhanden.", true);
 
-  // Open immediately on the user's click. Mobile Safari blocks windows opened only
-  // after asynchronous storage requests have finished.
   const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    return toast("Das Belegblatt wurde vom Browser blockiert. Bitte Popups für diese Seite erlauben.", true);
-  }
+  if (!printWindow) return toast("Das Belegblatt wurde vom Browser blockiert. Bitte Popups erlauben.", true);
 
-  printWindow.document.write(
-    '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht</title>' +
-    '<style>body{font-family:Arial,sans-serif;padding:20px;color:#222}.loading{margin:30px auto;max-width:500px;text-align:center}</style>' +
-    '</head><body><div class="loading"><h2>Belegübersicht wird erstellt …</h2><p>Bitte dieses Fenster geöffnet lassen.</p></div></body></html>'
-  );
+  printWindow.document.write('<!doctype html><html><head><meta charset="UTF-8"><title>Belegübersicht</title></head><body style="font-family:Arial;text-align:center;padding:30px"><h2>Belegübersicht wird erstellt …</h2><p>PDFs und Bilder werden aufbereitet.</p></body></html>');
   printWindow.document.close();
 
   try {
-    const cards = [];
+    const prepared = [];
     for (const row of rows) {
       const receipt = row.receipt;
       const file = receipt.receipt_files?.[0];
-      let imageUrl = "";
-      let isPdf = false;
+      let media = null;
+      let mediaError = "";
 
       if (file?.item_id) {
         const signed = await sb.storage.from("receipt-files").createSignedUrl(file.item_id, 900);
-        if (!signed.error) {
-          imageUrl = signed.data.signedUrl;
-          isPdf = String(file.mime_type || "").includes("pdf") ||
-            String(file.file_name || "").toLowerCase().endsWith(".pdf");
+        if (signed.error) {
+          mediaError = signed.error.message;
+        } else {
+          try {
+            media = await receiptFileToPrintableImage(file, signed.data.signedUrl);
+          } catch (error) {
+            console.error("Beleg konnte nicht aufbereitet werden", file.file_name, error);
+            mediaError = error.message;
+          }
         }
       }
-
-      cards.push(
-        '<article class="receipt-card"><div class="receipt-media">' +
-        (imageUrl && !isPdf
-          ? '<img src="' + escapeHtml(imageUrl) + '" alt="Beleg">'
-          : '<div class="pdf-placeholder">' + (isPdf ? "PDF-BELEG" : "BELEG NICHT VERFÜGBAR") + '</div>') +
-        '</div><div class="receipt-caption"><strong>' + escapeHtml(receiptNumber(receipt)) + '</strong>' +
-        '<span>' + escapeHtml(receipt.purpose || "") + '</span>' +
-        '<b>' + escapeHtml(euro(receipt.amount)) + '</b>' +
-        '<small>' + escapeHtml(formatDate(receiptAccountingDate(receipt))) +
-        (receipt.merchant ? " - " + escapeHtml(receipt.merchant) : "") + '</small>' +
-        (row.bankTransaction
-          ? '<small>Bank: ' + escapeHtml(formatDate(row.bankTransaction.booking_date)) +
-            ' - ' + escapeHtml(row.bankTransaction.external_reference || row.bankTransaction.description || "") + '</small>'
-          : '<small>Bankzuordnung: noch nicht verknüpft</small>') +
-        '</div></article>'
-      );
+      prepared.push({ row, media, mediaError });
     }
+
+    const cards = prepared.map(({ row, media, mediaError }) => {
+      const receipt = row.receipt;
+      return '<article class="receipt-card"><div class="receipt-media">' +
+        (media?.url
+          ? '<img src="' + escapeHtml(media.url) + '" alt="Beleg" data-kind="' + escapeHtml(media.kind) + '">'
+          : '<div class="file-error">BELEG NICHT DARSTELLBAR<br><small>' + escapeHtml(mediaError || "Datei nicht verfügbar") + '</small></div>') +
+        '</div><div class="receipt-caption"><strong>' + escapeHtml(receiptNumber(receipt)) + '</strong>' +
+        '<span>' + escapeHtml(receipt.purpose || "") + '</span><b>' + escapeHtml(euro(receipt.amount)) + '</b>' +
+        '<small>' + escapeHtml(formatDate(receiptAccountingDate(receipt))) +
+        (receipt.merchant ? " · " + escapeHtml(receipt.merchant) : "") + '</small>' +
+        (row.bankTransaction
+          ? '<small>Bank: ' + escapeHtml(formatDate(row.bankTransaction.booking_date)) + ' · ' +
+            escapeHtml(row.bankTransaction.external_reference || row.bankTransaction.description || "") + '</small>'
+          : '<small>Bankzuordnung: noch nicht verknüpft</small>') +
+        '</div></article>';
+    });
 
     printWindow.document.open();
     printWindow.document.write(
       '<!doctype html><html lang="de"><head><meta charset="UTF-8"><title>Belegübersicht Theatergruppe Grins</title>' +
       '<style>@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}' +
-      '.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:7mm}h1{font-size:18px;margin:0 0 2px}p{font-size:10px;margin:0;color:#555}' +
-      '.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4mm}.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;min-height:128mm;display:flex;flex-direction:column}' +
-      '.receipt-media{height:96mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fafafa}.receipt-media img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;object-position:center}' +
-      '.pdf-placeholder{border:1px dashed #aaa;padding:12mm 4mm;color:#777;font-weight:bold;text-align:center}.receipt-caption{padding-top:2mm;display:grid;gap:1mm;font-size:9px}' +
-      '.receipt-caption strong{font-size:10px}.receipt-caption b{font-size:10px}.receipt-caption small{font-size:8px;color:#444}</style></head><body>' +
-      '<div class="head"><div><h1>Theatergruppe Grins - Belegübersicht</h1><p>Hochgeladene Belege mit Zuordnung zur VereinsKassa</p></div>' +
-      '<div><p>Jahr: ' + escapeHtml($("auditYear").value || "") + '</p><p>Erstellt: ' +
-      escapeHtml(new Date().toLocaleDateString("de-AT")) + '</p></div></div><div class="grid">' +
-      cards.join("") + '</div></body></html>'
+      '.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:6mm}h1{font-size:18px;margin:0 0 2px}p{font-size:10px;margin:0;color:#555}' +
+      '.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4mm;align-items:start}' +
+      '.receipt-card{border:.25mm solid #aaa;padding:2mm;break-inside:avoid;display:flex;flex-direction:column;min-width:0}' +
+      '.receipt-media{min-height:45mm;display:flex;align-items:flex-start;justify-content:center;overflow:hidden;background:#fafafa;padding:1mm}' +
+      '.receipt-media img{display:block;width:auto;height:auto;object-fit:contain;object-position:top center}' +
+      '.file-error{margin:auto;border:1px dashed #aaa;padding:10mm 3mm;color:#777;font-weight:bold;text-align:center}.file-error small{font-weight:normal}' +
+      '.receipt-caption{padding-top:2mm;display:grid;gap:1mm;font-size:9px;border-top:.2mm solid #eee;margin-top:1.5mm}' +
+      '.receipt-caption strong,.receipt-caption b{font-size:10px}.receipt-caption small{font-size:8px;color:#444;overflow-wrap:anywhere}' +
+      '</style></head><body><div class="head"><div><h1>Theatergruppe Grins – Belegübersicht</h1><p>Hochgeladene Belege mit Bankzuordnung</p></div>' +
+      '<div><p>Jahr: ' + escapeHtml($("auditYear").value || "") + '</p><p>Erstellt: ' + escapeHtml(new Date().toLocaleDateString("de-AT")) +
+      '</p></div></div><div class="grid">' + cards.join("") + '</div></body></html>'
     );
     printWindow.document.close();
 
     const images = Array.from(printWindow.document.images);
-    await Promise.all(images.map((img) => {
-      if (img.complete) return Promise.resolve();
-      return new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
-        setTimeout(resolve, 5000);
-      });
-    }));
+    await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((resolve) => {
+      img.onload = resolve; img.onerror = resolve; setTimeout(resolve, 7000);
+    })));
 
     images.forEach((img) => {
-      const box = img.closest(".receipt-media");
-      if (!box || !img.naturalWidth || !img.naturalHeight) return;
-      const aspect = img.naturalHeight / img.naturalWidth;
-
-      // Long/narrow receipts need more width so the printed text remains readable.
-      // Wide/full-page documents are reduced to avoid oversized text.
-      if (aspect >= 2.8) {
-        img.style.width = "100%";
-        img.style.height = "auto";
-        img.style.maxHeight = "none";
-      } else if (aspect >= 1.8) {
-        img.style.width = "92%";
-        img.style.height = "auto";
-      } else if (aspect >= 1.15) {
-        img.style.width = "82%";
-        img.style.height = "auto";
-      } else {
-        img.style.width = "72%";
-        img.style.height = "auto";
+      if (!img.naturalWidth || !img.naturalHeight) return;
+      const scale = receiptPrintScale(img);
+      img.style.width = scale.width + "%";
+      img.style.maxWidth = "100%";
+      img.style.maxHeight = scale.maxHeight;
+      img.style.height = "auto";
+      if (scale.long) {
+        const card = img.closest(".receipt-card");
+        if (card) card.style.gridRow = "span 2";
       }
     });
 
     printWindow.focus();
-    printWindow.print();
+    setTimeout(() => printWindow.print(), 250);
   } catch (error) {
     console.error(error);
     printWindow.close();
