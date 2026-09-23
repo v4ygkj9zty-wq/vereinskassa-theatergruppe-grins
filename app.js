@@ -2224,67 +2224,100 @@ async function receiptFileToPrintableImage(file, signedUrl) {
 }
 
 async function autoCropReceiptImage(sourceUrl) {
-  // Fast, fail-safe crop. Never let image analysis block the receipt export.
+  // Conservative mobile-safe crop: analyse only a tiny preview and crop only
+  // when all four paper edges can be identified with reasonable confidence.
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
+    const timer = setTimeout(() => controller.abort(), 3000);
     const response = await fetch(sourceUrl, { signal: controller.signal });
-    clearTimeout(timeout);
+    clearTimeout(timer);
     if (!response.ok) return sourceUrl;
     const blob = await response.blob();
     const bitmap = await createImageBitmap(blob);
 
-    // Analyse a very small preview; the previous pixel-by-pixel 1000px scan was
-    // too expensive on iPad/iPhone and could freeze the export.
-    const maxSide = 360;
+    const maxSide = 320;
     const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const w = Math.max(1, Math.round(bitmap.width * scale));
     const h = Math.max(1, Math.round(bitmap.height * scale));
-    const c = document.createElement("canvas");
-    c.width = w; c.height = h;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(bitmap, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
+    const px = ctx.getImageData(0, 0, w, h).data;
 
-    const rowScore = (y) => {
-      let bright=0, count=0;
-      for(let x=0;x<w;x+=4){const i=(y*w+x)*4;const l=.299*data[i]+.587*data[i+1]+.114*data[i+2];if(l>175)bright++;count++;}
-      return bright/Math.max(1,count);
+    const lum = (x,y) => {
+      const i=(y*w+x)*4;
+      return .299*px[i]+.587*px[i+1]+.114*px[i+2];
     };
-    const colScore = (x) => {
-      let bright=0, count=0;
-      for(let y=0;y<h;y+=4){const i=(y*w+x)*4;const l=.299*data[i]+.587*data[i+1]+.114*data[i+2];if(l>175)bright++;count++;}
-      return bright/Math.max(1,count);
+
+    // Background brightness from corners. Paper threshold adapts to dark/light tables.
+    const corner=[];
+    const cw=Math.max(3,Math.round(w*.08)), ch=Math.max(3,Math.round(h*.08));
+    for(let y=0;y<ch;y+=2) for(let x=0;x<cw;x+=2) {
+      corner.push(lum(x,y),lum(w-1-x,y),lum(x,h-1-y),lum(w-1-x,h-1-y));
+    }
+    corner.sort((a,b)=>a-b);
+    const bg=corner[Math.floor(corner.length/2)]||120;
+    const paperThreshold=Math.max(155,Math.min(225,bg+32));
+
+    const rowPaper = y => {
+      let hit=0,n=0;
+      for(let x=0;x<w;x+=3){if(lum(x,y)>=paperThreshold)hit++;n++;}
+      return hit/Math.max(1,n);
+    };
+    const colPaper = x => {
+      let hit=0,n=0;
+      for(let y=0;y<h;y+=3){if(lum(x,y)>=paperThreshold)hit++;n++;}
+      return hit/Math.max(1,n);
+    };
+
+    // Require several neighbouring lines to agree, avoiding reflections and hands.
+    const stableRow = y => {
+      let score=0,n=0;
+      for(let d=-2;d<=2;d++){const yy=Math.max(0,Math.min(h-1,y+d));score+=rowPaper(yy);n++;}
+      return score/n;
+    };
+    const stableCol = x => {
+      let score=0,n=0;
+      for(let d=-2;d<=2;d++){const xx=Math.max(0,Math.min(w-1,x+d));score+=colPaper(xx);n++;}
+      return score/n;
     };
 
     let top=0,bottom=h-1,left=0,right=w-1;
-    while(top<h*.4 && rowScore(top)<.42) top+=2;
-    while(bottom>h*.6 && rowScore(bottom)<.42) bottom-=2;
-    while(left<w*.4 && colScore(left)<.42) left+=2;
-    while(right>w*.6 && colScore(right)<.42) right-=2;
+    const need=.38;
+    while(top<Math.floor(h*.42) && stableRow(top)<need) top+=2;
+    while(bottom>Math.ceil(h*.58) && stableRow(bottom)<need) bottom-=2;
+    while(left<Math.floor(w*.42) && stableCol(left)<need) left+=2;
+    while(right>Math.ceil(w*.58) && stableCol(right)<need) right-=2;
 
-    const bw=right-left, bh=bottom-top;
-    if(bw<w*.35 || bh<h*.35 || (bw*bh)/(w*h)>.96) return sourceUrl;
+    const bw=right-left+1,bh=bottom-top+1;
+    const ratio=(bw*bh)/(w*h);
+    // Do not crop if detection is doubtful or only removes a negligible border.
+    if(bw<w*.32 || bh<h*.32 || ratio>.94) return sourceUrl;
 
-    const pad=Math.max(2,Math.round(Math.min(bw,bh)*.025));
-    left=Math.max(0,left-pad);top=Math.max(0,top-pad);right=Math.min(w-1,right+pad);bottom=Math.min(h-1,bottom+pad);
-    const sx=Math.round(left/scale),sy=Math.round(top/scale);
-    const sw=Math.min(bitmap.width-sx,Math.round((right-left+1)/scale));
-    const sh=Math.min(bitmap.height-sy,Math.round((bottom-top+1)/scale));
+    // Keep a generous safety border so totals, dates and receipt numbers survive.
+    const pad=Math.max(4,Math.round(Math.min(bw,bh)*.04));
+    left=Math.max(0,left-pad);right=Math.min(w-1,right+pad);
+    top=Math.max(0,top-pad);bottom=Math.min(h-1,bottom+pad);
+
+    const sx=Math.max(0,Math.floor(left/scale));
+    const sy=Math.max(0,Math.floor(top/scale));
+    const sw=Math.min(bitmap.width-sx,Math.ceil((right-left+1)/scale));
+    const sh=Math.min(bitmap.height-sy,Math.ceil((bottom-top+1)/scale));
     if(sw<=0||sh<=0) return sourceUrl;
 
-    // Limit output dimensions as well: print does not benefit from multi-megapixel
-    // canvases, and this avoids memory pressure on mobile Safari.
-    const outScale=Math.min(1,1800/Math.max(sw,sh));
-    const ow=Math.max(1,Math.round(sw*outScale)),oh=Math.max(1,Math.round(sh*outScale));
+    // Export at print-appropriate resolution to keep Safari memory usage low.
+    const outScale=Math.min(1,1700/Math.max(sw,sh));
+    const ow=Math.max(1,Math.round(sw*outScale));
+    const oh=Math.max(1,Math.round(sh*outScale));
     const out=document.createElement("canvas");
     out.width=ow;out.height=oh;
     const o=out.getContext("2d");
     o.fillStyle="#fff";o.fillRect(0,0,ow,oh);
     o.drawImage(bitmap,sx,sy,sw,sh,0,0,ow,oh);
-    return out.toDataURL("image/jpeg",.9);
+    return out.toDataURL("image/jpeg",.90);
   } catch(error) {
-    console.warn("Schneller Belegzuschnitt übersprungen:",error);
+    console.warn("Automatischer Belegzuschnitt übersprungen:",error);
     return sourceUrl;
   }
 }
