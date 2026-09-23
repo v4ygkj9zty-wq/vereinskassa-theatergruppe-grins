@@ -129,3 +129,5 @@ input:focus,select:focus,textarea:focus{border-color:#57a69f;box-shadow:0 0 0 3p
 }
 
 .topbar-actions{display:flex;gap:8px;align-items:center}@media(max-width:520px){.topbar-actions .btn{padding:9px 10px;font-size:12px}}
+
+.demo-banner{position:sticky;top:0;z-index:100;background:#fef3c7;color:#854d0e;text-align:center;font-weight:850;font-size:12px;padding:7px;border-bottom:1px solid #f59e0b}.demo-banner+.wrap{} body{padding-top:0}
