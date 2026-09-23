@@ -2224,79 +2224,67 @@ async function receiptFileToPrintableImage(file, signedUrl) {
 }
 
 async function autoCropReceiptImage(sourceUrl) {
+  // Fast, fail-safe crop. Never let image analysis block the receipt export.
   try {
-    const response = await fetch(sourceUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const response = await fetch(sourceUrl, { signal: controller.signal });
+    clearTimeout(timeout);
     if (!response.ok) return sourceUrl;
     const blob = await response.blob();
     const bitmap = await createImageBitmap(blob);
 
-    // Downscale only for edge detection. The final crop is taken from the original.
-    const detectMax = 1000;
-    const detectScale = Math.min(1, detectMax / Math.max(bitmap.width, bitmap.height));
-    const dw = Math.max(1, Math.round(bitmap.width * detectScale));
-    const dh = Math.max(1, Math.round(bitmap.height * detectScale));
-    const detect = document.createElement("canvas");
-    detect.width = dw; detect.height = dh;
-    const dctx = detect.getContext("2d", { willReadFrequently: true });
-    dctx.drawImage(bitmap, 0, 0, dw, dh);
-    const pixels = dctx.getImageData(0, 0, dw, dh).data;
+    // Analyse a very small preview; the previous pixel-by-pixel 1000px scan was
+    // too expensive on iPad/iPhone and could freeze the export.
+    const maxSide = 360;
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
 
-    const lum = (x, y) => {
-      const i = (y * dw + x) * 4;
-      return 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+    const rowScore = (y) => {
+      let bright=0, count=0;
+      for(let x=0;x<w;x+=4){const i=(y*w+x)*4;const l=.299*data[i]+.587*data[i+1]+.114*data[i+2];if(l>175)bright++;count++;}
+      return bright/Math.max(1,count);
+    };
+    const colScore = (x) => {
+      let bright=0, count=0;
+      for(let y=0;y<h;y+=4){const i=(y*w+x)*4;const l=.299*data[i]+.587*data[i+1]+.114*data[i+2];if(l>175)bright++;count++;}
+      return bright/Math.max(1,count);
     };
 
-    // Estimate background from the outer border/corners. Receipts are normally
-    // substantially brighter than table/floor backgrounds.
-    const samples = [];
-    const step = Math.max(1, Math.floor(Math.min(dw, dh) / 80));
-    for (let x = 0; x < dw; x += step) {
-      samples.push(lum(x, 0), lum(x, dh - 1));
-    }
-    for (let y = 0; y < dh; y += step) {
-      samples.push(lum(0, y), lum(dw - 1, y));
-    }
-    samples.sort((a,b)=>a-b);
-    const bg = samples[Math.floor(samples.length / 2)] || 128;
+    let top=0,bottom=h-1,left=0,right=w-1;
+    while(top<h*.4 && rowScore(top)<.42) top+=2;
+    while(bottom>h*.6 && rowScore(bottom)<.42) bottom-=2;
+    while(left<w*.4 && colScore(left)<.42) left+=2;
+    while(right>w*.6 && colScore(right)<.42) right-=2;
 
-    // Detect likely paper pixels. Works for white/light receipts on darker or
-    // coloured surroundings, while falling back safely when detection is unsure.
-    const threshold = Math.max(150, Math.min(235, bg + 28));
-    const xs=[], ys=[];
-    const scanStep = Math.max(1, Math.round(Math.min(dw,dh)/500));
-    for (let y=0; y<dh; y+=scanStep) {
-      for (let x=0; x<dw; x+=scanStep) {
-        const l=lum(x,y);
-        if (l >= threshold) { xs.push(x); ys.push(y); }
-      }
-    }
-    if (xs.length < 200) return sourceUrl;
+    const bw=right-left, bh=bottom-top;
+    if(bw<w*.35 || bh<h*.35 || (bw*bh)/(w*h)>.96) return sourceUrl;
 
-    xs.sort((a,b)=>a-b); ys.sort((a,b)=>a-b);
-    // Percentiles ignore isolated bright reflections/background objects.
-    let left=xs[Math.floor(xs.length*0.015)], right=xs[Math.floor(xs.length*0.985)];
-    let top=ys[Math.floor(ys.length*0.015)], bottom=ys[Math.floor(ys.length*0.985)];
-    const boxW=right-left, boxH=bottom-top;
-    const areaRatio=(boxW*boxH)/(dw*dh);
-    if (boxW < dw*.22 || boxH < dh*.22 || areaRatio > .97) return sourceUrl;
+    const pad=Math.max(2,Math.round(Math.min(bw,bh)*.025));
+    left=Math.max(0,left-pad);top=Math.max(0,top-pad);right=Math.min(w-1,right+pad);bottom=Math.min(h-1,bottom+pad);
+    const sx=Math.round(left/scale),sy=Math.round(top/scale);
+    const sw=Math.min(bitmap.width-sx,Math.round((right-left+1)/scale));
+    const sh=Math.min(bitmap.height-sy,Math.round((bottom-top+1)/scale));
+    if(sw<=0||sh<=0) return sourceUrl;
 
-    const pad=Math.max(3,Math.round(Math.min(boxW,boxH)*.025));
-    left=Math.max(0,left-pad); top=Math.max(0,top-pad);
-    right=Math.min(dw-1,right+pad); bottom=Math.min(dh-1,bottom+pad);
-
-    const sx=Math.round(left/detectScale), sy=Math.round(top/detectScale);
-    const sw=Math.min(bitmap.width-sx,Math.round((right-left+1)/detectScale));
-    const sh=Math.min(bitmap.height-sy,Math.round((bottom-top+1)/detectScale));
-    if (sw<=0||sh<=0) return sourceUrl;
-
+    // Limit output dimensions as well: print does not benefit from multi-megapixel
+    // canvases, and this avoids memory pressure on mobile Safari.
+    const outScale=Math.min(1,1800/Math.max(sw,sh));
+    const ow=Math.max(1,Math.round(sw*outScale)),oh=Math.max(1,Math.round(sh*outScale));
     const out=document.createElement("canvas");
-    out.width=sw; out.height=sh;
-    const octx=out.getContext("2d");
-    octx.fillStyle="#fff"; octx.fillRect(0,0,sw,sh);
-    octx.drawImage(bitmap,sx,sy,sw,sh,0,0,sw,sh);
-    return out.toDataURL("image/jpeg",0.94);
-  } catch (error) {
-    console.warn("Automatischer Belegzuschnitt nicht möglich:", error);
+    out.width=ow;out.height=oh;
+    const o=out.getContext("2d");
+    o.fillStyle="#fff";o.fillRect(0,0,ow,oh);
+    o.drawImage(bitmap,sx,sy,sw,sh,0,0,ow,oh);
+    return out.toDataURL("image/jpeg",.9);
+  } catch(error) {
+    console.warn("Schneller Belegzuschnitt übersprungen:",error);
     return sourceUrl;
   }
 }
@@ -2340,7 +2328,10 @@ async function exportReceiptSheets() {
           mediaError = signed.error.message;
         } else {
           try {
-            media = await receiptFileToPrintableImage(file, signed.data.signedUrl);
+            media = await Promise.race([
+              receiptFileToPrintableImage(file, signed.data.signedUrl),
+              new Promise((resolve) => setTimeout(() => resolve({ url: signed.data.signedUrl, kind: "fallback" }), 6000))
+            ]);
           } catch (error) {
             console.error("Beleg konnte nicht aufbereitet werden", file.file_name, error);
             mediaError = error.message;
