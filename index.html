@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f766e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>VereinsKassa – Theatergruppe Grins</title>
+  <title>VereinsKassa DEMO – Theatergruppe Grins</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css?v=11">
 </head>
@@ -15,14 +15,15 @@
   <div class="wrap topbar-inner">
     <div>
       <h1>Theatergruppe Grins</h1>
-      <div class="subtitle">VereinsKassa</div>
+      <div class="subtitle">VereinsKassa · DEMO</div>
     </div>
-    <div class="topbar-actions"><button id="refreshAppBtn" class="btn btn-light hidden">Aktualisieren</button><button id="logoutBtn" class="btn btn-light hidden">Abmelden</button></div>
+    <div class="topbar-actions"><div class="topbar-actions"><button id="demoResetBtn" class="btn btn-light">Demo zurücksetzen</button></div></div>
   </div>
 </header>
 
+<div class="demo-banner">DEMO-MODUS · Nur Beispieldaten · Keine echten Vereinsdaten</div>
 <main class="wrap">
-  <section id="authView" class="card auth-card">
+  <section id="authView" class="card auth-card hidden">
     <h2>Anmelden</h2>
     <div class="two-col">
       <div>
@@ -45,7 +46,7 @@
     </div>
   </section>
 
-  <div id="appView" class="hidden">
+  <div id="appView">
     <section class="card compact user-card">
       <div class="user-copy">
         <span class="eyebrow">Angemeldet als</span>
@@ -253,6 +254,6 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=11"></script>
+<script src="demo.js"></script>
 </body>
 </html>
