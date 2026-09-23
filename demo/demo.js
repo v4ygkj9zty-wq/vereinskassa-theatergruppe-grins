@@ -38,7 +38,10 @@ const base={
 let data=JSON.parse(localStorage.getItem("vereinskassa-demo")||"null")||structuredClone(base);
 function save(){localStorage.setItem("vereinskassa-demo",JSON.stringify(data))}
 function nav(){
- const items=[["dashboard","Übersicht"],["submit","Beleg"],["my","Meine Belege"],["income","Geldeingang"],["payouts","Auszahlungen"],["bank","Bank"],["audit","Kassenprüfung"],["members","Mitglieder"]];
+ const role=localStorage.getItem("vereinskassa-demo-role")||"treasurer";
+ const items=role==="treasurer"
+  ? [["dashboard","Übersicht"],["submit","Beleg"],["my","Meine Belege"],["income","Geldeingang"],["payouts","Auszahlungen"],["bank","Bank"],["audit","Kassenprüfung"],["members","Mitglieder"]]
+  : [["submit","Beleg einreichen"],["my","Meine Belege"]];
  $("nav").innerHTML=items.map(x=>'<button class="btn btn-secondary" data-view="'+x[0]+'">'+x[1]+'</button>').join("");
  document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>show(b.dataset.view));
 }
@@ -72,7 +75,7 @@ $("helloText").textContent="Demo Kassier";$("roleText").textContent="Kassier · 
 $("editOwnIbanBtn").onclick=()=>alert("Demo: Hier kann die IBAN bearbeitet werden.");
 $("demoResetBtn").onclick=()=>{if(confirm("Demo wirklich auf Ausgangszustand zurücksetzen?")){data=structuredClone(base);save();show("dashboard")}};
 
-$("submitReceiptBtn").onclick=()=>{const n="#2026-"+String(data.receipts.length+1).padStart(4,"0");data.receipts.push({id:Date.now(),no:n,date:"23.09.2026",merchant:$("merchant").value||"Demo Händler",purpose:$("purpose").value||"Demo-Beleg",amount:Number($("amount").value)||42.5,payment:$("paymentMethod").selectedOptions[0].textContent,status:"wartet auf Freigabe"});save();toastDemo("Demo-Beleg wurde eingereicht.");show("my");};
+$("submitReceiptBtn").onclick=()=>{const n="#2026-"+String(data.receipts.length+1).padStart(4,"0");data.receipts.push({id:Date.now(),no:n,date:"23.09.2026",merchant:$("merchant").value||"Demo Händler",purpose:$("purpose").value||"Demo-Beleg",amount:Number($("amount").value)||42.5,payment:$("paymentMethod").selectedOptions[0].textContent,status:"wartet auf Freigabe",owner:"Demo Mitglied"});save();toastDemo("Demo-Beleg wurde eingereicht.");show("my");};
 $("saveIncomeBtn").onclick=()=>toastDemo("Demo-Geldeingang wurde gespeichert.");
 ["auditPrintBtn","auditCsvBtn","receiptSheetBtn"].forEach(id=>$(id).onclick=()=>alert("Demo: Export-Funktion wird hier vorgeführt."));
 nav();show("dashboard");
@@ -80,3 +83,26 @@ nav();show("dashboard");
 function toastDemo(msg){const el=document.getElementById("toast");el.textContent=msg;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2500);}
 if(document.getElementById("incomeChannel"))document.getElementById("incomeChannel").onchange=e=>document.getElementById("incomeAccountWrap").classList.toggle("hidden",e.target.value==="cash");
 ["auditPrintBtn","auditCsvBtn","receiptSheetBtn"].forEach(id=>{const el=document.getElementById(id);if(el)el.onclick=()=>toastDemo("Demo: Export wurde simuliert.");});
+
+function setDemoRole(role){
+  localStorage.setItem("vereinskassa-demo-role",role);
+  const isTreasurer=role==="treasurer";
+  $("helloText").textContent=isTreasurer?"Demo Kassier":"Demo Mitglied";
+  $("roleText").textContent=isTreasurer?"Kassier · Demo-Modus":"Mitglied · Demo-Modus";
+  $("ibanStatus").textContent=isTreasurer?"IBAN: AT00 0000 0000 0000 0000":"IBAN: AT11 1111 1111 1111 1111";
+  $("demoRoleSwitch").value=role;
+  nav();
+  show(isTreasurer?"dashboard":"submit");
+  toastDemo(isTreasurer?"Ansicht Kassier aktiviert.":"Ansicht Mitglied aktiviert.");
+}
+$("demoRoleSwitch").onchange=e=>setDemoRole(e.target.value);
+const initialRole=localStorage.getItem("vereinskassa-demo-role")||"treasurer";
+$("demoRoleSwitch").value=initialRole;
+setDemoRole(initialRole);
+
+// Make common demo workflow actions interactive without touching production data.
+document.addEventListener("click",e=>{
+  const t=e.target;
+  if(t.matches("#missingReceipts .btn")) toastDemo("Demo-Ausgabe wurde als 'kein Beleg erforderlich' erledigt.");
+  if(t.matches("#unmatchedIncomeTransactions .btn")) toastDemo("Demo-Eingang wurde zugeordnet.");
+});
