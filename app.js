@@ -1916,6 +1916,10 @@ async function importBankCsv() {
   const referenceColumn = $("mapReference").value;
   const file = $("bankFile").files[0];
 
+  if (file && file.name.toLowerCase().endsWith(".pdf")) {
+    const ok=window.confirm("PDF-Kontoauszug: Bitte die Vorschau kontrollieren. Stimmen Konto, Datum, Beträge und Vorzeichen? Erst mit OK werden Buchungen importiert.");
+    if(!ok)return;
+  }
   if (!accountId || !dateColumn || !amountColumn || !file) {
     toast("Bitte Konto, Datumsspalte und Betragsspalte auswählen.", true);
     return;
