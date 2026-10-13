@@ -1824,7 +1824,7 @@ async function parseSparkasseStatementPdf(file) {
       if((date&&amt)||fallback){
         const dt=date?date.s.match(dateRe)[1]:fallback[1];
         const amountText=amt?amt.s.replace(/\s/g,""):fallback[2];
-        const negative=amountText.includes("-") || (amt && line.items.some(i=>i.x>amt.x && /^[-−–]$/.test(i.s))) || /[-−–]\s*$/.test(text);
+        const negative=/[-−–]/.test(amountText) || (amt && line.items.some(i=>i.x>=amt.x && /^[-−–]$/.test(i.s))) || /[-−–]\s*$/.test(text);
         const number=Number(amountText.replace(/\./g,"").replace(",",".").replace(/[-−–]/g,""))*(negative?-1:1);
         const description=date?line.items.filter(i=>i.x<date.x-4).map(i=>i.s).join(" ").trim():text.slice(0,fallback.index).trim();
         // An end-of-month heading has a date but no actual amount; excluded above.
