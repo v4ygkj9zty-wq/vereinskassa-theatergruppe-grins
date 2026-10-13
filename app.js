@@ -1786,17 +1786,78 @@ async function editBankAccount(id) {
   await loadBank();
 }
 
+async function parseSparkasseStatementPdf(file) {
+  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+  const pdf = await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  const records=[];
+  let iban="", statement="";
+  const rowPattern=/(\d{2}\.\d{2}\.\d{4})\s*\*?\s+((?:\d{1,3}(?:\.\d{3})*|\d+),\d{2}-?)(?:\s|$)/;
+  const money = v => Number(v.replace(/\./g,"").replace(",",".").replace("-","")) * (v.endsWith("-")?-1:1);
+  for(let n=1;n<=pdf.numPages;n++){
+    const page=await pdf.getPage(n);
+    const content=await page.getTextContent();
+    const items=content.items.filter(x=>x.str?.trim()).map(x=>({text:x.str.trim(),x:x.transform[4],y:x.transform[5]}));
+    const text=items.map(x=>x.text).join(" ");
+    iban ||= (text.match(/AT\d{18}/)||[])[0]||"";
+    statement ||= (text.match(/(?:Nr\.\s*)?(\d{3}\/2026)/)||[])[1]||"";
+    const lines=[];
+    for(const item of items){
+      let line=lines.find(l=>Math.abs(l.y-item.y)<3);
+      if(!line){line={y:item.y,parts:[]};lines.push(line);}
+      line.parts.push(item);
+    }
+    lines.sort((a,b)=>b.y-a.y);
+    let inTable=false, active=null;
+    for(const line of lines){
+      line.parts.sort((a,b)=>a.x-b.x);
+      const lineText=line.parts.map(p=>p.text).join(" ").replace(/\s+/g," ").trim();
+      if(/Buchungstext\/Booking Text/.test(lineText)){inTable=true;continue;}
+      if(!inTable)continue;
+      if(/Neuer Kontostand\/New Balance/.test(lineText)){if(active)records.push(active);active=null;break;}
+      // Only transaction rows have a value date and amount at the far right.
+      // Ignore statement balances, explanatory dates and headings.
+      const m=lineText.match(rowPattern);
+      if(m){
+        if(active)records.push(active);
+        const description=lineText.slice(0,m.index).trim();
+        active={date:m[1],amount:money(m[2]),description,extra:[]};
+      }else if(active && !/^\*{3}|Reklamationen|Aktuelle Informationen|Information gemäß|Sollzinsen|Änderung der Konditionen|Einlagensicherung|erstattungsfähig|www\.|Filiale|VKrG/i.test(lineText)){
+        if(lineText.length<180)active.extra.push(lineText);
+      }
+    }
+    if(active)records.push(active);
+  }
+  if(!records.length)throw new Error("Keine Buchungen erkannt. Bitte den Kontoauszug prüfen.");
+  const unique=new Map();
+  for(const r of records){
+    const description=r.description||r.extra[0]||"Bankbuchung";
+    const counterparty=r.extra.find(x=>x!==description && !/^(TRef|NOTPROVIDED)/i.test(x))||"";
+    const key=[r.date,r.amount.toFixed(2),description,counterparty].join("|");
+    if(!unique.has(key))unique.set(key,{"Datum":r.date,"Betrag":r.amount.toFixed(2),"Buchungstext":description,"Gegenpartei":counterparty,"Bankreferenz":r.extra.find(x=>/TRef|Ref|^\d{10,}/i.test(x))||""});
+  }
+  return {rows:[...unique.values()],iban,statement,pages:pdf.numPages};
+}
+
 async function handleBankFile(file) {
   if (!file) return;
 
-  const Papa = await import("https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm");
-  const parsed = Papa.default.parse(await file.text(), {
-    header: true,
-    skipEmptyLines: true
-  });
-
-  csvRows = parsed.data || [];
-  csvHeaders = parsed.meta.fields || [];
+  if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
+    try {
+      $("bankPreview").textContent="PDF-Kontoauszug wird gelesen …";
+      const result=await parseSparkasseStatementPdf(file);
+      csvRows=result.rows;
+      csvHeaders=["Datum","Betrag","Buchungstext","Gegenpartei","Bankreferenz"];
+      const matched=bankAccounts.find(a=>String(a.iban||"").replace(/\s/g,"")===result.iban);
+      if(matched)$("importAccount").value=matched.id;
+      $("bankPreview").textContent="PDF erkannt: "+result.rows.length+" Buchungen auf "+result.pages+" Seite(n). Bitte Buchungen und Konto vor dem Import prüfen.";
+    } catch(error){$("mappingBox").classList.add("hidden");return toast("PDF-Erkennung fehlgeschlagen: "+error.message,true);}
+  } else {
+    const Papa = await import("https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm");
+    const parsed = Papa.default.parse(await file.text(), {header:true,skipEmptyLines:true});
+    csvRows=parsed.data||[];
+    csvHeaders=parsed.meta.fields||[];
+  }
 
   if (!csvHeaders.length) {
     toast("Keine CSV-Spalten erkannt.", true);
