@@ -1848,7 +1848,7 @@ async function parseSparkasseStatementPdf(file) {
   return {rows,iban,statement,pages:pdf.numPages};
 }
 
-async function handleBankFile(file) {
+async function handleBankFile(file, options = {}) {
   if (!file) return;
 
   if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
@@ -1890,6 +1890,7 @@ async function handleBankFile(file) {
   $("mapReference").value = findHeader(/beleg|referenz|reference|ref\.?|transaktion|umsatz.?id|buchungs.?id/i);
 
   $("mappingBox").classList.remove("hidden");
+  if (!options.silent) $("importBankBtn").disabled = false;
 
   $("bankPreview").innerHTML =
     "<table><thead><tr>" +
@@ -1907,16 +1908,42 @@ async function handleBankFile(file) {
     "</tbody></table>";
 }
 
-async function importBankCsv() {
+let batchImportRunning=false;
+async function importSelectedBankFiles() {
+ const files=Array.from($("bankFile").files||[]);
+ if(!files.length)return toast("Bitte Dateien auswählen.",true);
+ if(files.length===1)return importBankCsv();
+ if(files.some(f=>!f.name.toLowerCase().endsWith(".pdf"))){
+   return toast("Mehrfachimport unterstützt derzeit PDF-Kontoauszüge. CSV bitte einzeln importieren.",true);
+ }
+ if(!window.confirm(files.length+" PDF-Auszüge nacheinander importieren? Bitte vorher Konto und Buchungen kontrollieren."))return;
+ batchImportRunning=true;
+ const button=$("importBankBtn");
+ button.disabled=true;
+ let processed=0;
+ try{
+  for(const file of files){
+   await handleBankFile(file,{silent:true});
+   if(!csvRows.length)throw new Error(file.name+": Keine Buchungen erkannt");
+   button.textContent="Import "+(processed+1)+"/"+files.length;
+   await importBankCsv(file);
+   processed++;
+  }
+  toast(processed+" Kontoauszüge verarbeitet. Bitte Buchungen kontrollieren.");
+  await loadBank();
+ }catch(e){toast("Import gestoppt nach "+processed+" Dateien: "+e.message,true);}
+ finally{batchImportRunning=false;button.disabled=false;button.textContent="Importieren";}
+}
+async function importBankCsv(overrideFile) {
   const accountId = $("importAccount").value;
   const dateColumn = $("mapDate").value;
   const amountColumn = $("mapAmount").value;
   const descriptionColumn = $("mapDescription").value;
   const counterpartyColumn = $("mapCounterparty").value;
   const referenceColumn = $("mapReference").value;
-  const file = $("bankFile").files[0];
+  const file = overrideFile || $("bankFile").files[0];
 
-  if (file && file.name.toLowerCase().endsWith(".pdf")) {
+  if (!batchImportRunning && file && file.name.toLowerCase().endsWith(".pdf")) {
     const ok=window.confirm("PDF-Kontoauszug: Bitte die Vorschau kontrollieren. Stimmen Konto, Datum, Beträge und Vorzeichen? Erst mit OK werden Buchungen importiert.");
     if(!ok)return;
   }
@@ -1939,7 +1966,7 @@ async function importBankCsv() {
     .upload(sourcePath, file, { contentType: file.type || "text/csv", upsert: false });
 
   if (uploadResult.error) {
-    $("importBankBtn").disabled = false;
+    if (!batchImportRunning) $("importBankBtn").disabled = false;
     return toast(uploadResult.error.message, true);
   }
 
@@ -2685,9 +2712,10 @@ $("receiptSheetBtn").addEventListener("click", exportReceiptSheets);
 
 $("bankFile").addEventListener("change", (event) => {
   handleBankFile(event.target.files[0]);
+  if(event.target.files.length>1) $("bankPreview").insertAdjacentHTML("afterbegin","<p><strong>"+event.target.files.length+" Dateien ausgewählt.</strong> Beim Import werden alle PDFs nacheinander verarbeitet.</p>");
 });
 
-$("importBankBtn").addEventListener("click", importBankCsv);
+$("importBankBtn").addEventListener("click", importSelectedBankFiles);
 
 sb.auth.onAuthStateChange((event, session) => {
   if (event === "SIGNED_OUT" || !session) {
