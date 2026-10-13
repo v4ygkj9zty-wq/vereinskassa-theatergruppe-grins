@@ -1787,56 +1787,65 @@ async function editBankAccount(id) {
 }
 
 async function parseSparkasseStatementPdf(file) {
-  const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
-  const pdf = await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  const pdfjs=await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+  const pdf=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
   const records=[];
-  let iban="", statement="";
-  const rowPattern=/(\d{2}\.\d{2}\.\d{4})\s*\*?\s+((?:\d{1,3}(?:\.\d{3})*|\d+),\d{2}-?)(?:\s|$)/;
-  const money = v => Number(v.replace(/\./g,"").replace(",",".").replace("-","")) * (v.endsWith("-")?-1:1);
-  for(let n=1;n<=pdf.numPages;n++){
-    const page=await pdf.getPage(n);
+  let iban="",statement="";
+  const dateRe=/\b(\d{2}\.\d{2}\.\d{4})\b/;
+  const amountRe=/^(\d{1,3}(?:\.\d{3})*|\d+),(\d{2})(-?)$/;
+  for(let pageNo=1;pageNo<=pdf.numPages;pageNo++){
+    const page=await pdf.getPage(pageNo);
     const content=await page.getTextContent();
-    const items=content.items.filter(x=>x.str?.trim()).map(x=>({text:x.str.trim(),x:x.transform[4],y:x.transform[5]}));
-    const text=items.map(x=>x.text).join(" ");
-    iban ||= (text.match(/AT\d{18}/)||[])[0]||"";
-    statement ||= (text.match(/(?:Nr\.\s*)?(\d{3}\/2026)/)||[])[1]||"";
+    const items=content.items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str.trim(),x:i.transform[4],y:i.transform[5]}));
+    const full=items.map(i=>i.s).join(" ");
+    iban ||= (full.match(/AT\s*\d{18}/)||[])[0]?.replace(/\s/g,"")||"";
+    statement ||= (full.match(/\b\d{3}\/20\d{2}\b/)||[])[0]||"";
     const lines=[];
-    for(const item of items){
-      let line=lines.find(l=>Math.abs(l.y-item.y)<3);
-      if(!line){line={y:item.y,parts:[]};lines.push(line);}
-      line.parts.push(item);
+    for(const it of items){
+      let l=lines.find(z=>Math.abs(z.y-it.y)<=3.5);
+      if(!l){l={y:it.y,items:[]};lines.push(l);}
+      l.items.push(it);
     }
-    lines.sort((a,b)=>b.y-a.y);
-    let inTable=false, active=null;
+    lines.sort((x,y)=>y.y-x.y);
+    let inTable=false,active=null;
     for(const line of lines){
-      line.parts.sort((a,b)=>a.x-b.x);
-      const lineText=line.parts.map(p=>p.text).join(" ").replace(/\s+/g," ").trim();
-      if(/Buchungstext\/Booking Text/.test(lineText)){inTable=true;continue;}
+      line.items.sort((x,y)=>x.x-y.x);
+      const text=line.items.map(x=>x.s).join(" ").replace(/\s+/g," ").trim();
+      if(/Buchungstext|Booking Text/i.test(text)){inTable=true;continue;}
       if(!inTable)continue;
-      if(/Neuer Kontostand\/New Balance/.test(lineText)){if(active)records.push(active);active=null;break;}
-      // Only transaction rows have a value date and amount at the far right.
-      // Ignore statement balances, explanatory dates and headings.
-      const m=lineText.match(rowPattern);
-      if(m){
-        if(active)records.push(active);
-        const description=lineText.slice(0,m.index).trim();
-        active={date:m[1],amount:money(m[2]),description,extra:[]};
-      }else if(active && !/^\*{3}|Reklamationen|Aktuelle Informationen|Information gemäß|Sollzinsen|Änderung der Konditionen|Einlagensicherung|erstattungsfähig|www\.|Filiale|VKrG/i.test(lineText)){
-        if(lineText.length<180)active.extra.push(lineText);
+      if(/Neuer Kontostand|New Balance/i.test(text)){if(active)records.push(active);active=null;break;}
+      const dates=line.items.filter(i=>dateRe.test(i.s));
+      const amounts=line.items.filter(i=>amountRe.test(i.s.replace(/\s/g,"")));
+      let date=dates.find(i=>i.x>180)||dates[0];
+      let amt=amounts.filter(i=>!date||i.x>date.x).sort((x,y)=>y.x-x.x)[0];
+      // Some PDFs put date and amount in the same text item.
+      const fallback=text.match(/(\d{2}\.\d{2}\.\d{4})\s*\*?\s+((?:\d{1,3}(?:\.\d{3})*|\d+),\d{2}-?)\s*$/);
+      if((date&&amt)||fallback){
+        const dt=date?date.s.match(dateRe)[1]:fallback[1];
+        const amountText=amt?amt.s.replace(/\s/g,""):fallback[2];
+        const number=Number(amountText.replace(/\./g,"").replace(",",".").replace(/-$/,""))*(amountText.endsWith("-")?-1:1);
+        const description=date?line.items.filter(i=>i.x<date.x-4).map(i=>i.s).join(" ").trim():text.slice(0,fallback.index).trim();
+        // An end-of-month heading has a date but no actual amount; excluded above.
+        if(description&&Number.isFinite(number)){
+          if(active)records.push(active);
+          active={date:dt,amount:number,description,extra:[]};
+        }
+      }else if(active && text && !/^\*{3}|Reklamationen|Einlagensicherung|erstattungsfähig|www\.|Information gemäß|Sollzinsen|Konditionen|^Aktuelle Informationen/i.test(text)){
+        active.extra.push(text);
       }
     }
     if(active)records.push(active);
   }
-  if(!records.length)throw new Error("Keine Buchungen erkannt. Bitte den Kontoauszug prüfen.");
-  const unique=new Map();
-  for(const r of records){
-    const description=r.description||r.extra[0]||"Bankbuchung";
-    const counterparty=r.extra.find(x=>x!==description && !/^(TRef|NOTPROVIDED)/i.test(x))||"";
-    const key=[r.date,r.amount.toFixed(2),description,counterparty].join("|");
-    if(!unique.has(key))unique.set(key,{"Datum":r.date,"Betrag":r.amount.toFixed(2),"Buchungstext":description,"Gegenpartei":counterparty,"Bankreferenz":r.extra.find(x=>/TRef|Ref|^\d{10,}/i.test(x))||""});
-  }
-  return {rows:[...unique.values()],iban,statement,pages:pdf.numPages};
+  if(!records.length)throw new Error("Keine Buchungen erkannt. PDF-Textlayout konnte nicht gelesen werden.");
+  const rows=records.map(r=>({
+    Datum:r.date,
+    Betrag:r.amount.toFixed(2),
+    Buchungstext:r.description,
+    Gegenpartei:r.extra.find(x=>!/^(TRef|NOTPROVIDED)/i.test(x))||"",
+    Bankreferenz:r.extra.find(x=>/TRef|Ref|^\d{10,}/i.test(x))||""
+  }));
+  return {rows,iban,statement,pages:pdf.numPages};
 }
 
 async function handleBankFile(file) {
