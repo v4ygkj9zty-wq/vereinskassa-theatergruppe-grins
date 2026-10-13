@@ -184,13 +184,13 @@
 
       <section class="card">
         <h2>Bankauszug importieren</h2>
-        <p class="hint">CSV-Import mit Spaltenzuordnung und Dublettenprüfung.</p>
+        <p class="hint">CSV- oder PDF-Kontoauszug der Sparkasse Imst mit Vorschau und Dublettenprüfung.</p>
 
         <label for="importAccount">Konto</label>
         <select id="importAccount"></select>
 
-        <label for="bankFile">CSV-Datei</label>
-        <input id="bankFile" type="file" accept=".csv,text/csv">
+        <label for="bankFile">CSV- oder PDF-Datei</label>
+        <input id="bankFile" type="file" accept=".csv,text/csv,.pdf,application/pdf">
 
         <div id="mappingBox" class="hidden">
           <div class="two-col">
@@ -253,6 +253,6 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=16"></script>
+<script type="module" src="app.js?v=17"></script>
 </body>
 </html>
