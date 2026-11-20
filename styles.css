@@ -24,6 +24,7 @@ textarea{min-height:86px;resize:vertical}
 .nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.nav .active{background:#0f766e;color:#fff}
 .hidden{display:none!important}
 .user-card{display:flex;align-items:center;justify-content:space-between}
+.user-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .stat{background:#fff;border:1px solid #dce8e8;border-radius:15px;padding:14px}.stat span{font-size:12px;color:#60767d}.stat strong{display:block;font-size:21px;margin-top:6px}
 .filters{display:grid;grid-template-columns:180px 260px;gap:12px;align-items:end}
@@ -40,6 +41,7 @@ textarea{min-height:86px;resize:vertical}
 
 .list-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid #edf2f2}
 .list-row:last-child{border-bottom:0}
+.list-row.receipt-highlight{background:#ecfdf5;border:1px solid #86c9be;border-radius:12px;padding:12px;box-shadow:0 0 0 4px rgba(15,118,110,.08)}
 .list-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .status{display:inline-block;font-size:12px;font-weight:750;border-radius:999px;padding:4px 8px}
 .status.submitted{background:#fff3cd;color:#795b00}
@@ -129,3 +131,4 @@ input:focus,select:focus,textarea:focus{border-color:#57a69f;box-shadow:0 0 0 3p
 }
 
 .topbar-actions{display:flex;gap:8px;align-items:center}@media(max-width:520px){.topbar-actions .btn{padding:9px 10px;font-size:12px}}
+

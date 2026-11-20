@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>VereinsKassa – Theatergruppe Grins</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
 <header class="topbar">
@@ -53,7 +53,10 @@
         <div id="roleText" class="hint"></div>
         <div id="ibanStatus" class="hint"></div>
       </div>
-      <button id="editOwnIbanBtn" class="btn btn-secondary">Meine IBAN</button>
+      <div class="user-actions">
+        <button id="pushNotificationsBtn" class="btn btn-secondary hidden">Push aktivieren</button>
+        <button id="editOwnIbanBtn" class="btn btn-secondary">Meine IBAN</button>
+      </div>
     </section>
 
     <nav id="nav" class="nav"></nav>
@@ -253,6 +256,7 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=21"></script>
+<script type="module" src="app.js?v=22"></script>
 </body>
 </html>
+

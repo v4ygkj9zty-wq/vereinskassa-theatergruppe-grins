@@ -3,6 +3,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = "https://joqolbaxxqgcyrcytkbj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RGQntYSRRnTiyzamlczY3A_aRDIlp8X";
 const APP_URL = "https://v4ygkj9zty-wq.github.io/vereinskassa-theatergruppe-grins/";
+const VAPID_PUBLIC_KEY = "BIKs9c5HMGdN9rmZpB-WWdnB1HlM7_zx15_THnlHkN90roDUb3bhca7Ymdq8cqsPyxGTkPnn5I3hjcnLQIB9Smk";
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
@@ -80,6 +81,87 @@ function receiptNumber(receipt) {
   const source = receipt.receipt_date || receipt.created_at || "";
   const year = source.slice(0, 4) || new Date().getFullYear();
   return "#" + year + "-" + String(receipt.receipt_no || 0).padStart(4, "0");
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+}
+
+async function getServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator)) throw new Error("Service Worker wird nicht unterstützt.");
+  const existing = await navigator.serviceWorker.getRegistration();
+  if (!existing) await navigator.serviceWorker.register("./sw.js");
+  return navigator.serviceWorker.ready;
+}
+
+async function updatePushButton() {
+  const button = $("pushNotificationsBtn");
+  if (!button) return;
+  const supported = "Notification" in window && "PushManager" in window && "serviceWorker" in navigator;
+  button.classList.toggle("hidden", currentProfile?.role !== "treasurer");
+  if (currentProfile?.role !== "treasurer") return;
+  if (!supported) {
+    button.textContent = "Push nicht unterstützt";
+    button.disabled = true;
+    return;
+  }
+  const registration = await getServiceWorkerRegistration();
+  const subscription = await registration.pushManager.getSubscription();
+  button.textContent = subscription ? "Push deaktivieren" : "Push aktivieren";
+  button.disabled = false;
+}
+
+async function savePushSubscription(subscription) {
+  const json = subscription.toJSON();
+  const result = await sb.from("push_subscriptions").upsert({
+    user_id: currentUser.id,
+    endpoint: subscription.endpoint,
+    p256dh: json.keys?.p256dh,
+    auth: json.keys?.auth,
+    user_agent: navigator.userAgent,
+    active: true,
+    last_seen_at: new Date().toISOString()
+  }, { onConflict: "endpoint" });
+  if (result.error) throw result.error;
+}
+
+async function togglePushNotifications() {
+  const button = $("pushNotificationsBtn");
+  button.disabled = true;
+  try {
+    const registration = await getServiceWorkerRegistration();
+    const existing = await registration.pushManager.getSubscription();
+    if (existing) {
+      const endpoint = existing.endpoint;
+      await existing.unsubscribe();
+      const removeResult = await sb.from("push_subscriptions").delete().eq("endpoint", endpoint);
+      if (removeResult.error) throw removeResult.error;
+      toast("Push-Benachrichtigungen wurden deaktiviert.");
+    } else {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Benachrichtigungen wurden nicht erlaubt.");
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+      await savePushSubscription(subscription);
+      toast("Push-Benachrichtigungen sind aktiviert.");
+    }
+  } catch (error) {
+    toast("Push konnte nicht geändert werden: " + error.message, true);
+  } finally {
+    await updatePushButton();
+  }
+}
+
+async function sendReceiptPush(receiptId) {
+  const result = await sb.functions.invoke("send-receipt-push", {
+    body: { receiptId }
+  });
+  if (result.error) console.warn("Push-Benachrichtigung:", result.error.message);
 }
 
 function parseMoney(value) {
@@ -241,11 +323,22 @@ async function enterApp() {
   $("helloText").textContent = "Hallo " + currentProfile.display_name;
   $("roleText").textContent = roleLabel(currentProfile.role);
   renderIbanStatus();
+  await updatePushButton();
 
   try {
     await loadReferences();
     buildNavigation();
-    await showView("submit");
+    const linkedReceiptId = new URL(window.location.href).searchParams.get("receipt");
+    await showView(linkedReceiptId && financeRoles.includes(currentProfile.role) ? "my" : "submit");
+    if (linkedReceiptId && financeRoles.includes(currentProfile.role)) {
+      window.setTimeout(() => {
+        const row = document.getElementById("receipt-" + linkedReceiptId);
+        if (row) {
+          row.classList.add("receipt-highlight");
+          row.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 50);
+    }
   } catch (error) {
     toast("Daten konnten nicht geladen werden: " + error.message, true);
   }
@@ -667,7 +760,11 @@ async function submitReceipt() {
   });
 
   if (fileLinkResult.error) {
-    console.warn("Dateiverknüpfung:", fileLinkResult.error.message);
+    await sb.from("receipts").delete().eq("id", insertResult.data.id);
+    await sb.storage.from("receipt-files").remove([storagePath]);
+    $("submitReceiptBtn").disabled = false;
+    toast("Beleg konnte nicht vollständig gespeichert werden: " + fileLinkResult.error.message, true);
+    return;
   }
 
   await sb.from("audit_log").insert({
@@ -677,6 +774,8 @@ async function submitReceipt() {
     action: "submitted",
     details: { payment_method: $("paymentMethod").value }
   });
+
+  await sendReceiptPush(insertResult.data.id);
 
   ["merchant", "receiptDate", "amount", "invoiceNumber", "purpose"].forEach((id) => {
     $(id).value = "";
@@ -855,7 +954,7 @@ async function loadMyReceipts() {
     .map((receipt) => {
       const file = receipt.receipt_files && receipt.receipt_files[0];
       return (
-        '<div class="list-row">' +
+        '<div class="list-row" id="receipt-' + escapeHtml(receipt.id) + '">' +
         "<div>" +
         "<strong>" +
         escapeHtml(receiptNumber(receipt)) +
@@ -2668,6 +2767,7 @@ $("refreshAppBtn").addEventListener("click", async () => {
   }
 });
 $("editOwnIbanBtn").addEventListener("click", editOwnIban);
+$("pushNotificationsBtn").addEventListener("click", togglePushNotifications);
 $("submitReceiptBtn").addEventListener("click", submitReceipt);
 $("saveIncomeBtn").addEventListener("click", saveIncome);
 $("incomeChannel").addEventListener("change", () => {
@@ -2739,3 +2839,4 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
