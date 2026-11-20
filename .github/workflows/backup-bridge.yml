@@ -1,4 +1,4 @@
-name: Secure VereinsKassa backup bridge
+name: Encrypted VereinsKassa backup bridge
 on:
   push:
     paths:
@@ -12,7 +12,7 @@ jobs:
   export:
     runs-on: ubuntu-latest
     steps:
-      - name: Request GitHub OIDC token and export backup
+      - name: Export encrypted archive using GitHub OIDC
         shell: bash
         run: |
           set -euo pipefail
@@ -24,21 +24,12 @@ jobs:
           curl --fail --silent --show-error --location \
             -H "Authorization: Bearer ${TOKEN}" \
             'https://joqolbaxxqgcyrcytkbj.supabase.co/functions/v1/vereinskassa-backup-export' \
-            --output VereinsKassa_Backup_2026-09-21.zip
-          unzip -t VereinsKassa_Backup_2026-09-21.zip
-          mkdir -p extracted
-          unzip -q VereinsKassa_Backup_2026-09-21.zip -d extracted
-          cat extracted/manifest.json
-          if [ -d extracted/receipts/2026 ]; then
-            (cd extracted/receipts && zip -qr ../../VereinsKassa_Belege_2026.zip 2026)
-          fi
-      - name: Upload backup artifact
+            --output VereinsKassa_Backup_2026-11-21.zip.enc
+          test -s VereinsKassa_Backup_2026-11-21.zip.enc
+      - name: Upload short-lived encrypted backup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vereinskassa-backup-2026-09-21
-          path: |
-            VereinsKassa_Backup_2026-09-21.zip
-            VereinsKassa_Belege_2026.zip
-            extracted/manifest.json
+          name: vereinskassa-backup-encrypted-2026-11-21
+          path: VereinsKassa_Backup_2026-11-21.zip.enc
           if-no-files-found: error
           retention-days: 1
